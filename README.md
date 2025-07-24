@@ -22,6 +22,11 @@ Join [our community](https://discord.gg/YENaT9h8jh) for discussions, support, an
 
 [![](https://dcbadge.limes.pink/api/server/https://discord.gg/YENaT9h8jh)](https://discord.gg/YENaT9h8jh)
 
+## Attribution
+
+Portions of the OCI registry implementation are derived from OpenTofu's 
+module distribution code, used under the Apache 2.0 license.
+
 ## License
 
 This code is released under the MIT License. See [LICENSE.txt](LICENSE.txt).

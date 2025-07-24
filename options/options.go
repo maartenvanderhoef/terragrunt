@@ -19,6 +19,7 @@ import (
 	"github.com/gruntwork-io/terragrunt/internal/cloner"
 	"github.com/gruntwork-io/terragrunt/internal/errors"
 	"github.com/gruntwork-io/terragrunt/internal/experiment"
+	"github.com/gruntwork-io/terragrunt/internal/oci"
 	"github.com/gruntwork-io/terragrunt/internal/report"
 	"github.com/gruntwork-io/terragrunt/internal/strict"
 	"github.com/gruntwork-io/terragrunt/internal/strict/controls"
@@ -213,6 +214,8 @@ type TerragruntOptions struct {
 	VersionManagerFileName []string
 	// Experiments is a map of experiments, and their status.
 	Experiments experiment.Experiments `clone:"shadowcopy"`
+	// OCIRepositoryStoreFactory is used to create OCI repository stores for module downloads
+	OCIRepositoryStoreFactory oci.RepositoryStoreFactory `clone:"shadowcopy"`
 	// Maximum number of times to retry errors matching RetryableErrors
 	RetryMaxAttempts int
 	// Parallelism limits the number of commands to run concurrently during *-all commands
@@ -715,7 +718,11 @@ type ErrorsPattern struct {
 // RunWithErrorHandling runs the given operation and handles any errors according to the configuration.
 func (opts *TerragruntOptions) RunWithErrorHandling(ctx context.Context, l log.Logger, r *report.Report, operation func() error) error {
 	if opts.Errors == nil {
-		return operation()
+		err := operation()
+		if err != nil {
+			return errors.New(err)
+		}
+		return nil
 	}
 
 	currentAttempt := 1
@@ -729,11 +736,11 @@ func (opts *TerragruntOptions) RunWithErrorHandling(ctx context.Context, l log.L
 		// Process the error through our error handling configuration
 		action, processErr := opts.Errors.ProcessError(l, err, currentAttempt)
 		if processErr != nil {
-			return fmt.Errorf("error processing error handling rules: %w", processErr)
+			return errors.New(fmt.Errorf("error processing error handling rules: %w", processErr))
 		}
 
 		if action == nil {
-			return err
+			return errors.New(err)
 		}
 
 		if action.ShouldIgnore {
@@ -742,14 +749,14 @@ func (opts *TerragruntOptions) RunWithErrorHandling(ctx context.Context, l log.L
 			// Handle ignore signals if any are configured
 			if len(action.IgnoreSignals) > 0 {
 				if err := opts.handleIgnoreSignals(l, action.IgnoreSignals); err != nil {
-					return err
+					return errors.New(err)
 				}
 			}
 
 			if opts.Experiments.Evaluate(experiment.Report) {
 				run, err := r.GetRun(opts.WorkingDir)
 				if err != nil {
-					return err
+					return errors.New(err)
 				}
 
 				if err := r.EndRun(
@@ -758,7 +765,7 @@ func (opts *TerragruntOptions) RunWithErrorHandling(ctx context.Context, l log.L
 					report.WithReason(report.ReasonErrorIgnored),
 					report.WithCauseIgnoreBlock(action.IgnoreBlockName),
 				); err != nil {
-					return err
+					return errors.New(err)
 				}
 			}
 
@@ -778,7 +785,7 @@ func (opts *TerragruntOptions) RunWithErrorHandling(ctx context.Context, l log.L
 				// Assume the retry will succeed.
 				run, err := r.GetRun(opts.WorkingDir)
 				if err != nil {
-					return err
+					return errors.New(err)
 				}
 
 				if err := r.EndRun(
@@ -787,24 +794,24 @@ func (opts *TerragruntOptions) RunWithErrorHandling(ctx context.Context, l log.L
 					report.WithReason(report.ReasonRetrySucceeded),
 					report.WithCauseRetryBlock(action.RetryBlockName),
 				); err != nil {
-					return err
+					return errors.New(err)
 				}
 			}
 
 			// Sleep before retry
 			select {
 			case <-time.After(time.Duration(action.RetrySleepSecs) * time.Second):
-				// try again
+				// continue
 			case <-ctx.Done():
 				return errors.New(ctx.Err())
 			}
 
 			currentAttempt++
-
 			continue
 		}
 
-		return err
+		// If we get here, the error is not ignored or retried
+		return errors.New(err)
 	}
 }
 

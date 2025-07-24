@@ -5,6 +5,7 @@ package ctyhelper
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/gocty"
@@ -106,4 +107,41 @@ func UpdateUnknownCtyValValues(value cty.Value) (cty.Value, error) {
 	}
 
 	return value, nil
+}
+
+// ParseCtyValueToStringSlice converts a cty.Value to a []string.
+// This function handles both list and tuple types, and ensures all values are strings.
+func ParseCtyValueToStringSlice(value cty.Value) ([]string, error) {
+	if value.IsNull() {
+		return []string{}, nil
+	}
+
+	if !value.IsKnown() {
+		return nil, fmt.Errorf("cannot parse unknown value to string slice")
+	}
+
+	if !value.Type().IsTupleType() && !value.Type().IsListType() {
+		return nil, fmt.Errorf("expected list or tuple type, got %s", value.Type().FriendlyName())
+	}
+
+	valueSlice := value.AsValueSlice()
+	result := make([]string, 0, len(valueSlice))
+
+	for i, val := range valueSlice {
+		if val.IsNull() {
+			return nil, fmt.Errorf("item %d is null", i)
+		}
+
+		if !val.IsKnown() {
+			return nil, fmt.Errorf("item %d is unknown", i)
+		}
+
+		if !val.Type().Equals(cty.String) {
+			return nil, fmt.Errorf("item %d is not a string (got %s)", i, val.Type().FriendlyName())
+		}
+
+		result = append(result, val.AsString())
+	}
+
+	return result, nil
 }

@@ -142,6 +142,18 @@ func TestTerragruntConfigAsCtyDrift(t *testing.T) {
 }`,
 			},
 		},
+		OCI: &config.OCIConfig{
+			DiscoverAmbientCredentials: &testTrue,
+			DockerConfigFiles:          []string{"/path/to/config.json"},
+			CredentialHelpers:          []string{"desktop"},
+			CacheCredentials:           &testTrue,
+			Credentials: []config.OCICredentialsConfig{
+				{
+					Registry: "registry.example.com",
+					Username: &testSource,
+				},
+			},
+		},
 		Exclude: &config.ExcludeConfig{},
 	}
 	ctyVal, err := config.TerragruntConfigAsCty(&testConfig)
@@ -224,6 +236,19 @@ func TestTerraformConfigAsCtyDrift(t *testing.T) {
 	ctyTerraformConfigFields := ctyTerraformConfigStructInfo.Names()
 	sort.Strings(ctyTerraformConfigFields)
 	assert.Equal(t, terraformConfigFields, ctyTerraformConfigFields)
+}
+
+// This test makes sure that all the fields in OCIConfig exist in ctyOCIConfig.
+func TestOCIConfigAsCtyDrift(t *testing.T) {
+	t.Parallel()
+
+	ociConfigStructInfo := structs.New(config.OCIConfig{})
+	ociConfigFields := ociConfigStructInfo.Names()
+	sort.Strings(ociConfigFields)
+	ctyOCIConfigStructInfo := structs.New(config.CtyOCIConfig{})
+	ctyOCIConfigFields := ctyOCIConfigStructInfo.Names()
+	sort.Strings(ctyOCIConfigFields)
+	assert.Equal(t, ociConfigFields, ctyOCIConfigFields)
 }
 
 func TestStackUnitCtyReading(t *testing.T) {
@@ -323,6 +348,8 @@ func terragruntConfigStructFieldToMapKey(t *testing.T, fieldName string) (string
 		return "exclude", true
 	case "Errors":
 		return "errors", true
+	case "OCI":
+		return "oci", true
 	default:
 		t.Fatalf("Unknown struct property: %s", fieldName)
 		// This should not execute

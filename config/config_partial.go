@@ -39,6 +39,7 @@ const (
 	EngineBlock
 	ExcludeBlock
 	ErrorsBlock
+	OCIBlock PartialDecodeSectionType = iota
 )
 
 // terragruntIncludeMultiple is a struct that can be used to only decode the include block with labels.
@@ -124,6 +125,12 @@ type terragruntInputs struct {
 type terragruntEngine struct {
 	Engine *EngineConfig `hcl:"engine,block"`
 	Remain hcl.Body      `hcl:",remain"`
+}
+
+// terragruntOCI is a struct that can only be used to decode the oci block.
+type terragruntOCI struct {
+	OCI    *OCIConfigFile `hcl:"oci,block"`
+	Remain hcl.Body       `hcl:",remain"`
 }
 
 // DecodeBaseBlocks takes in a parsed HCL2 file and decodes the base blocks. Base blocks are blocks that should always
@@ -634,6 +641,41 @@ func PartialParseConfig(ctx *ParsingContext, l log.Logger, file *hclparse.File, 
 				output.Errors.Merge(decoded.Errors)
 			} else {
 				output.Errors = decoded.Errors
+			}
+		case OCIBlock:
+			decoded := terragruntOCI{}
+			if err := file.Decode(&decoded, evalParsingContext); err != nil {
+				return nil, err
+			}
+
+			// The OCI block might not be present in the file, so check for nil.
+			if decoded.OCI == nil {
+				continue
+			}
+
+			// Use the helper from oci.go to convert the raw file struct into the final usable config.
+			ociConfig, err := decoded.OCI.Decode(evalParsingContext)
+			if err != nil {
+				return nil, fmt.Errorf("error decoding oci block in partial parse: %w", err)
+			}
+
+			// Validate the OCI configuration
+			if err := ociConfig.Validate(); err != nil {
+				return nil, fmt.Errorf("error validating oci block: %w", err)
+			}
+
+			// Merge the result into the output config, which may already have an OCI config from an include block.
+			if output.OCI != nil {
+				// Merge the OCI configurations, with the current one taking precedence
+				output.OCI = MergeOciConfig(output.OCI, ociConfig)
+				// TODO REMOVE FROM HERE
+				// Validate the merged OCI configuration
+				if err := output.OCI.Validate(); err != nil {
+					return nil, fmt.Errorf("error validating merged OCI configuration: %w", err)
+				}
+				// TO HERE
+			} else {
+				output.OCI = ociConfig
 			}
 
 		default:

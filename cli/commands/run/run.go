@@ -33,6 +33,7 @@ import (
 	"github.com/gruntwork-io/terragrunt/internal/cli"
 	"github.com/gruntwork-io/terragrunt/internal/errors"
 	"github.com/gruntwork-io/terragrunt/internal/experiment"
+	"github.com/gruntwork-io/terragrunt/internal/oci"
 	"github.com/gruntwork-io/terragrunt/internal/remotestate"
 	"github.com/gruntwork-io/terragrunt/internal/report"
 	"github.com/gruntwork-io/terragrunt/internal/strict/controls"
@@ -134,6 +135,11 @@ func run(ctx context.Context, l log.Logger, opts *options.TerragruntOptions, r *
 	}
 
 	opts.Errors = errConfig
+
+	// Initialize OCI repository store factory if OCI registry experiment is enabled
+	if opts.Experiments.Evaluate(experiment.OCIRegistry) {
+		opts.OCIRepositoryStoreFactory = oci.NewRepositoryStoreFactory(terragruntConfig.OCI, l)
+	}
 
 	l, terragruntOptionsClone, err := opts.CloneWithConfigPath(l, opts.TerragruntConfigPath)
 	if err != nil {

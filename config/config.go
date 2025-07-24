@@ -89,6 +89,7 @@ const (
 	MetadataValues                      = "values"
 	MetadataStack                       = "stack"
 	MetadataUnit                        = "unit"
+	MetadataOCI                         = "oci"
 )
 
 var (
@@ -165,6 +166,7 @@ type TerragruntConfig struct {
 	TerragruntVersionConstraint string
 	TerraformVersionConstraint  string
 	TerraformBinary             string
+	OCI                         *OCIConfig
 	TerragruntDependencies      Dependencies
 	RetryableErrors             []string
 	FeatureFlags                FeatureFlags
@@ -668,10 +670,12 @@ type terragruntConfigFile struct {
 	IamAssumeRoleDuration    *int64              `hcl:"iam_assume_role_duration,attr"`
 	IamAssumeRoleSessionName *string             `hcl:"iam_assume_role_session_name,attr"`
 	IamWebIdentityToken      *string             `hcl:"iam_web_identity_token,attr"`
-	TerragruntDependencies   []Dependency        `hcl:"dependency,block"`
-	FeatureFlags             []*FeatureFlag      `hcl:"feature,block"`
-	Exclude                  *ExcludeConfig      `hcl:"exclude,block"`
-	Errors                   *ErrorsConfig       `hcl:"errors,block"`
+	OCI                      *OCIConfig          `hcl:"oci,block"`
+
+	TerragruntDependencies []Dependency   `hcl:"dependency,block"`
+	FeatureFlags           []*FeatureFlag `hcl:"feature,block"`
+	Exclude                *ExcludeConfig `hcl:"exclude,block"`
+	Errors                 *ErrorsConfig  `hcl:"errors,block"`
 
 	// We allow users to configure code generation via blocks:
 	//
@@ -1742,6 +1746,11 @@ func convertToTerragruntConfig(ctx *ParsingContext, configPath string, terragrun
 	if terragruntConfigFromFile.Errors != nil {
 		terragruntConfig.Errors = terragruntConfigFromFile.Errors
 		terragruntConfig.SetFieldMetadata(MetadataErrors, defaultMetadata)
+	}
+
+	if terragruntConfigFromFile.OCI != nil {
+		terragruntConfig.OCI = terragruntConfigFromFile.OCI
+		terragruntConfig.SetFieldMetadata(MetadataOCI, defaultMetadata)
 	}
 
 	generateBlocks := []terragruntGenerateBlock{}
