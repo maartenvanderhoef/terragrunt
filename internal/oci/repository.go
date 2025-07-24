@@ -107,11 +107,7 @@ func (r *orasRepositoryStore) Resolve(ctx context.Context, reference string) (oc
 	})
 
 	if err != nil {
-		return ociv1.Descriptor{}, OCIReferenceResolutionError{
-			reference: reference,
-			registry:  r.registry,
-			details:   err.Error(),
-		}
+		return ociv1.Descriptor{}, OCIReferenceResolutionError{registry: r.registry, details: err.Error(), requestID: requestID}
 	}
 
 	r.logger.Debugf("[%s] Resolved OCI reference %s to descriptor: %s", requestID, reference, desc.Digest.String())
@@ -136,13 +132,13 @@ func (r *orasRepositoryStore) resolveWithRetry(ctx context.Context, reference st
 			select {
 			case <-ctx.Done():
 				requestID := OCIRequestIDFromContext(ctx)
-				return ociv1.Descriptor{}, NewOCITimeoutErrorFromContext(r.registry, "resolve", "context cancelled", requestID)
+				return ociv1.Descriptor{}, OCITimeoutError{Registry: r.registry, Reason: "resolve: context cancelled", RequestID: requestID}
 			default:
 				// Add exponential backoff delay between retries with context-aware sleep
 				backoffDuration := time.Duration(attempt*attempt) * 100 * time.Millisecond
 				if err := contextAwareSleep(ctx, backoffDuration); err != nil {
 					requestID := OCIRequestIDFromContext(ctx)
-					return ociv1.Descriptor{}, NewOCITimeoutErrorFromContext(r.registry, "resolve", backoffDuration.String(), requestID)
+					return ociv1.Descriptor{}, OCITimeoutError{Registry: r.registry, Reason: "resolve: timeout " + backoffDuration.String(), RequestID: requestID}
 				}
 			}
 		}
@@ -190,11 +186,7 @@ func (r *orasRepositoryStore) Fetch(ctx context.Context, target ociv1.Descriptor
 	})
 
 	if err != nil {
-		return nil, OCIBlobDownloadError{
-			digest:   target.Digest.String(),
-			registry: r.registry,
-			details:  err.Error(),
-		}
+		return nil, OCIBlobDownloadError{registry: r.registry, details: err.Error(), requestID: requestID}
 	}
 
 	return reader, nil
@@ -219,13 +211,13 @@ func (r *orasRepositoryStore) fetchWithRetry(ctx context.Context, target ociv1.D
 			select {
 			case <-ctx.Done():
 				requestID := OCIRequestIDFromContext(ctx)
-				return nil, NewOCITimeoutErrorFromContext(r.registry, "fetch", "context cancelled", requestID)
+				return nil, OCITimeoutError{Registry: r.registry, Reason: "fetch: context cancelled", RequestID: requestID}
 			default:
 				// Add exponential backoff delay between retries with context-aware sleep
 				backoffDuration := time.Duration(attempt*attempt) * 100 * time.Millisecond
 				if err := contextAwareSleep(ctx, backoffDuration); err != nil {
 					requestID := OCIRequestIDFromContext(ctx)
-					return nil, NewOCITimeoutErrorFromContext(r.registry, "fetch", backoffDuration.String(), requestID)
+					return nil, OCITimeoutError{Registry: r.registry, Reason: "fetch: timeout " + backoffDuration.String(), RequestID: requestID}
 				}
 			}
 		}

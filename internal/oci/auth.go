@@ -158,15 +158,6 @@ const (
 	CredentialMethodNone         CredentialMethod = "none"
 )
 
-// CredentialLookupResult contains detailed information about credential discovery
-type CredentialLookupResult struct {
-	Method     CredentialMethod
-	Found      bool
-	Error      error
-	Details    string
-	Credential orasAuth.Credential
-}
-
 // getOCICredentials retrieves authentication credentials for the specified registry host.
 // This function implements the same credential lookup strategy as Terragrunt's TFR getter
 // to ensure consistent authentication behavior across different registry types.
@@ -190,41 +181,19 @@ func getOCICredentials(ctx context.Context, hostport string, ociConfig *ociconfi
 	requestID := OCIRequestIDFromContext(ctx)
 	logger.Debugf("[%s] Starting credential discovery for host: %s", requestID, hostport)
 
-	// Track all credential lookup attempts for detailed logging
-	var attempts []CredentialLookupResult
-
 	// Method 0: Check Terragrunt OCI configuration first (highest priority)
 	if ociConfig != nil {
 		logger.Debugf("[%s] Attempting credential method: %s", requestID, CredentialMethodOCIConfig)
 		cred, found := getCredentialsFromOCIConfig(ctx, hostport, ociConfig, logger)
-
-		result := CredentialLookupResult{
-			Method:     CredentialMethodOCIConfig,
-			Found:      found,
-			Credential: cred,
-		}
-
 		if found {
-			result.Details = "Found credentials in Terragrunt OCI configuration"
-			attempts = append(attempts, result)
-			logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
+			logger.Debugf("[%s] Found credentials in Terragrunt OCI configuration", requestID)
 			return cred, nil
 		} else {
-			result.Details = "No credentials found in Terragrunt OCI configuration"
+			logger.Tracef("[%s] No credentials found in Terragrunt OCI configuration", requestID)
 		}
-		attempts = append(attempts, result)
-
 		// If ambient credential discovery is disabled, don't try the other methods
 		if !ociConfig.GetDiscoverAmbientCredentials() {
 			logger.Tracef("[%s] Ambient credential discovery disabled for %s, skipping ambient credential sources", requestID, hostport)
-			result := CredentialLookupResult{
-				Method:     CredentialMethodNone,
-				Found:      true,
-				Details:    "Ambient credential discovery disabled",
-				Credential: orasAuth.EmptyCredential,
-			}
-			attempts = append(attempts, result)
-			logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
 			return orasAuth.EmptyCredential, nil
 		}
 	}
@@ -232,46 +201,24 @@ func getOCICredentials(ctx context.Context, hostport string, ociConfig *ociconfi
 	// Method 1: Try Terraform CLI configuration first (same as TFR)
 	logger.Tracef("[%s] Attempting credential method: %s", requestID, CredentialMethodTerraformCLI)
 	cred, err := getCredentialsFromTerraformCLI(hostport, logger)
-
-	result := CredentialLookupResult{
-		Method: CredentialMethodTerraformCLI,
-		Error:  err,
-	}
-
 	if err != nil {
-		result.Details = fmt.Sprintf("Error loading Terraform CLI config: %v", err)
-		logger.Tracef("[%s] %s", requestID, result.Details)
+		logger.Tracef("[%s] Error loading Terraform CLI config: %v", requestID, err)
 	} else if cred != (orasAuth.Credential{}) {
-		result.Found = true
-		result.Credential = cred
-		result.Details = "Found credentials in Terraform CLI configuration"
-		attempts = append(attempts, result)
-		logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
+		logger.Debugf("[%s] Found credentials in Terraform CLI configuration", requestID)
 		return cred, nil
 	} else {
-		result.Details = "No credentials found in Terraform CLI configuration"
+		logger.Tracef("[%s] No credentials found in Terraform CLI configuration", requestID)
 	}
-	attempts = append(attempts, result)
 
 	// Method 2: Fall back to TG_OCI_REGISTRY_TOKEN environment variable
 	logger.Tracef("[%s] Attempting credential method: %s", requestID, CredentialMethodEnvironment)
 	cred, found := getCredentialsFromEnvironment(hostport, logger)
-
-	result = CredentialLookupResult{
-		Method: CredentialMethodEnvironment,
-		Found:  found,
-	}
-
 	if found {
-		result.Credential = cred
-		result.Details = "Found credentials in environment variables"
-		attempts = append(attempts, result)
-		logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
+		logger.Debugf("[%s] Found credentials in environment variables", requestID)
 		return cred, nil
 	} else {
-		result.Details = "No credentials found in environment variables"
+		logger.Tracef("[%s] No credentials found in environment variables", requestID)
 	}
-	attempts = append(attempts, result)
 
 	// Method 3: Try Docker config files
 	dockerConfigFiles := []string{}
@@ -285,80 +232,31 @@ func getOCICredentials(ctx context.Context, hostport string, ociConfig *ociconfi
 	if len(dockerConfigFiles) > 0 {
 		logger.Tracef("[%s] Attempting credential method: %s (files: %v)", requestID, CredentialMethodDockerConfig, dockerConfigFiles)
 		cred, err := getCredentialsFromDockerConfigFiles(ctx, hostport, dockerConfigFiles, logger)
-
-		result := CredentialLookupResult{
-			Method: CredentialMethodDockerConfig,
-			Error:  err,
-		}
-
 		if err != nil {
-			result.Details = fmt.Sprintf("Error reading Docker config files: %v", err)
-			logger.Tracef("[%s] %s", requestID, result.Details)
+			logger.Tracef("[%s] Error reading Docker config files: %v", requestID, err)
 		} else if cred != (orasAuth.Credential{}) {
-			result.Found = true
-			result.Credential = cred
-			result.Details = "Found credentials in Docker config files"
-			attempts = append(attempts, result)
-			logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
+			logger.Debugf("[%s] Found credentials in Docker config files", requestID)
 			return cred, nil
 		} else {
-			result.Details = "No credentials found in Docker config files"
+			logger.Tracef("[%s] No credentials found in Docker config files", requestID)
 		}
-		attempts = append(attempts, result)
 	}
 
 	// Method 4: Try Docker credential helpers
 	logger.Tracef("[%s] Attempting credential method: %s", requestID, CredentialMethodDockerHelper)
 	cred, err = getCredentialsFromDockerHelper(ctx, hostport, ociConfig, logger)
-
-	result = CredentialLookupResult{
-		Method: CredentialMethodDockerHelper,
-		Error:  err,
-	}
-
 	if err != nil {
-		result.Details = fmt.Sprintf("Error querying Docker credential helpers: %v", err)
-		logger.Tracef("[%s] %s", requestID, result.Details)
+		logger.Tracef("[%s] Error querying Docker credential helpers: %v", requestID, err)
 	} else if cred != (orasAuth.Credential{}) {
-		result.Found = true
-		result.Credential = cred
-		result.Details = "Found credentials from Docker credential helper"
-		attempts = append(attempts, result)
-		logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
+		logger.Debugf("[%s] Found credentials from Docker credential helper", requestID)
 		return cred, nil
 	} else {
-		result.Details = "No credentials found from Docker credential helpers"
+		logger.Tracef("[%s] No credentials found from Docker credential helpers", requestID)
 	}
-	attempts = append(attempts, result)
 
 	// Method 5: Return empty credentials (no authentication)
-	result = CredentialLookupResult{
-		Method:     CredentialMethodNone,
-		Found:      true,
-		Details:    "No credentials found, proceeding without authentication",
-		Credential: orasAuth.EmptyCredential,
-	}
-	attempts = append(attempts, result)
-	logCredentialDiscoveryResult(logger, requestID, hostport, attempts, result)
-
+	logger.Debugf("[%s] No credentials found, proceeding without authentication", requestID)
 	return orasAuth.EmptyCredential, nil
-}
-
-// logCredentialDiscoveryResult logs detailed information about the credential discovery process
-func logCredentialDiscoveryResult(logger log.Logger, requestID, hostport string, attempts []CredentialLookupResult, finalResult CredentialLookupResult) {
-	logger.Debugf("[%s] Credential discovery completed for %s using method: %s", requestID, hostport, finalResult.Method)
-
-	// Log detailed summary of all attempts for troubleshooting (trace level for verbosity)
-	logger.Tracef("[%s] Credential discovery summary for %s:", requestID, hostport)
-	for i, attempt := range attempts {
-		status := "FAILED"
-		if attempt.Found {
-			status = "SUCCESS"
-		} else if attempt.Error != nil {
-			status = "ERROR"
-		}
-		logger.Tracef("[%s]   %d. %s: %s - %s", requestID, i+1, attempt.Method, status, attempt.Details)
-	}
 }
 
 // getCredentialsFromDockerHelper attempts to retrieve credentials using Docker credential helpers.
@@ -605,7 +503,7 @@ func executeTokenCommand(ctx context.Context, cmdArgs []string) (string, error) 
 		return "", fmt.Errorf("empty token command")
 	}
 
-	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...) // #nosec G204
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

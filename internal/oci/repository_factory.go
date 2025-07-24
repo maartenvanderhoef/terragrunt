@@ -84,9 +84,6 @@ type DefaultRepositoryStoreFactory struct {
 
 	// Telemeter provides telemetry collection for operations
 	Telemeter *telemetry.Telemeter
-
-	// HealthChecker provides registry health checking capabilities
-	HealthChecker *RegistryHealthChecker
 }
 
 // CreateRepositoryStore creates and caches ORAS-Go repository connections with
@@ -141,7 +138,7 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 	// Check for cancellation before cache operation
 	select {
 	case <-ctx.Done():
-		return nil, NewOCITimeoutErrorFromContext(registryDomain, "cache_lookup", "context cancelled", requestID)
+		return nil, OCITimeoutError{Registry: registryDomain, Reason: "cache_lookup: context cancelled", RequestID: requestID}
 	default:
 	}
 
@@ -156,7 +153,7 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 	// Check for cancellation before expensive registry operations
 	select {
 	case <-ctx.Done():
-		return nil, NewOCITimeoutErrorFromContext(registryDomain, "registry_creation", "context cancelled", requestID)
+		return nil, OCITimeoutError{Registry: registryDomain, Reason: "registry_creation: context cancelled", RequestID: requestID}
 	default:
 	}
 
@@ -179,28 +176,8 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 	// Check for cancellation before ping (network operation)
 	select {
 	case <-ctx.Done():
-		return nil, NewOCITimeoutErrorFromContext(registryDomain, "registry_ping", "context cancelled", requestID)
+		return nil, OCITimeoutError{Registry: registryDomain, Reason: "registry_ping: context cancelled", RequestID: requestID}
 	default:
-	}
-
-	// Perform comprehensive health check before ping
-	if f.HealthChecker != nil {
-		f.Logger.Debugf("[%s] Performing health check for %s", requestID, registryDomain)
-		healthStatus := f.HealthChecker.CheckRegistryHealth(ctx, registryDomain)
-
-		if !healthStatus.Available {
-			suggestions := GetHealthCheckSuggestions(healthStatus)
-			details := fmt.Sprintf("[%s] health check failed: %s. Suggestions: %v",
-				requestID, healthStatus.Details, suggestions)
-
-			return nil, OCIRegistryConnectionError{
-				registry: registryDomain,
-				details:  details,
-			}
-		}
-
-		f.Logger.Debugf("[%s] Health check passed for %s (response time: %v)",
-			requestID, registryDomain, healthStatus.ResponseTime)
 	}
 
 	// Test connection with ping - this respects context cancellation
@@ -220,11 +197,7 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 	// Create repository with context support
 	repo, err := registry.Repository(ctx, repositoryName)
 	if err != nil {
-		return nil, OCIRegistryConnectionError{
-			registry:   registryDomain,
-			repository: repositoryName,
-			details:    fmt.Sprintf("[%s] repository creation failed: %v", requestID, err),
-		}
+		return nil, OCIRegistryConnectionError{registry: registryDomain, details: fmt.Sprintf("[%s] repository creation failed: %v", requestID, err), requestID: requestID}
 	}
 
 	// Create the store wrapper
@@ -266,13 +239,10 @@ func NewRepositoryStoreFactoryWithTelemetry(ociConfig *ociconfig.OCIConfig, logg
 		Logger:    logger,
 	}
 
-	healthChecker := NewRegistryHealthChecker(logger, telemeter)
-
 	return &DefaultRepositoryStoreFactory{
 		OCIConfig:     ociConfig,
 		AuthFactory:   authFactory,
 		Logger:        logger,
 		Telemeter:     telemeter,
-		HealthChecker: healthChecker,
 	}
 }
