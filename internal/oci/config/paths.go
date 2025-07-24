@@ -14,29 +14,29 @@ import (
 // - $HOME/.config/containers/auth.json (fallback if XDG_CONFIG_HOME not set)
 func DefaultDockerConfigFiles() []string {
 	var paths []string
-	
+
 	// Standard Docker config location
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		paths = append(paths, filepath.Join(homeDir, ".docker", "config.json"))
 	}
-	
+
 	// XDG_CONFIG_HOME location (podman/buildah)
 	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	if xdgConfigHome == "" && homeDir != "" {
 		// Default to $HOME/.config if XDG_CONFIG_HOME not set
 		xdgConfigHome = filepath.Join(homeDir, ".config")
 	}
-	
+
 	if xdgConfigHome != "" {
 		paths = append(paths, filepath.Join(xdgConfigHome, "containers", "auth.json"))
 	}
-	
+
 	// XDG_RUNTIME_DIR location (podman/buildah runtime)
 	if xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDir != "" {
 		paths = append(paths, filepath.Join(xdgRuntimeDir, "containers", "auth.json"))
 	}
-	
+
 	return paths
 }
 
@@ -55,7 +55,7 @@ func ExpandPath(path string) string {
 			}
 		}
 	}
-	
+
 	// Expand environment variables
 	return os.ExpandEnv(path)
 }
@@ -65,11 +65,11 @@ func ExpandPaths(paths []string) []string {
 	if paths == nil {
 		return nil
 	}
-	
+
 	expanded := make([]string, len(paths))
 	for i, path := range paths {
 		expanded[i] = ExpandPath(path)
 	}
-	
+
 	return expanded
 }

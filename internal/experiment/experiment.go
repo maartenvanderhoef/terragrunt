@@ -75,8 +75,8 @@ func NewExperiments() Experiments {
 			Name: AutoProviderCacheDir,
 		},
 		{
-            Name: OCIRegistry,  // Add this
-        },
+			Name: OCIRegistry, // Add this
+		},
 	}
 }
 

@@ -213,8 +213,6 @@ func TestOCICredentialsConfigValidation(t *testing.T) {
 	}
 }
 
-
-
 func TestFindCredentialsForRegistry(t *testing.T) {
 	t.Parallel()
 
@@ -352,9 +350,9 @@ func TestFindCredentialsForRegistry(t *testing.T) {
 			},
 		},
 		{
-			name: "nil config returns nil",
-			config: nil,
-			registry: "any.registry.com",
+			name:           "nil config returns nil",
+			config:         nil,
+			registry:       "any.registry.com",
 			expectedResult: nil,
 		},
 		{
@@ -362,7 +360,7 @@ func TestFindCredentialsForRegistry(t *testing.T) {
 			config: &OCIConfig{
 				Credentials: []OCICredentialsConfig{},
 			},
-			registry: "any.registry.com",
+			registry:       "any.registry.com",
 			expectedResult: nil,
 		},
 		{
@@ -397,7 +395,7 @@ func TestFindCredentialsForRegistry(t *testing.T) {
 			} else {
 				assert.NotNil(t, result)
 				assert.Equal(t, test.expectedResult.Registry, result.Registry)
-				
+
 				// Check username if expected
 				if test.expectedResult.Username != nil {
 					assert.NotNil(t, result.Username)
@@ -405,7 +403,7 @@ func TestFindCredentialsForRegistry(t *testing.T) {
 				} else {
 					assert.Nil(t, result.Username)
 				}
-				
+
 				// Check password if expected
 				if test.expectedResult.Password != nil {
 					assert.NotNil(t, result.Password)
@@ -413,7 +411,7 @@ func TestFindCredentialsForRegistry(t *testing.T) {
 				} else {
 					assert.Nil(t, result.Password)
 				}
-				
+
 				// Check token if expected
 				if test.expectedResult.Token != nil {
 					assert.NotNil(t, result.Token)
@@ -421,7 +419,7 @@ func TestFindCredentialsForRegistry(t *testing.T) {
 				} else {
 					assert.Nil(t, result.Token)
 				}
-				
+
 				// Check credential helper if expected
 				if test.expectedResult.CredentialHelper != nil {
 					assert.NotNil(t, result.CredentialHelper)
@@ -577,8 +575,6 @@ func TestGetPrimaryAuthMethod(t *testing.T) {
 		})
 	}
 }
-
-
 
 func TestCredentialLookupIntegration(t *testing.T) {
 	t.Parallel()

@@ -58,11 +58,11 @@ func (err OCIURLParseErr) Error() string {
 
 // OCIManifestErr is returned when there are issues with OCI manifest processing.
 type OCIManifestErr struct {
-	Registry    string
-	Repository  string
-	Reference   string
-	Issue       string
-	RequestID   string
+	Registry   string
+	Repository string
+	Reference  string
+	Issue      string
+	RequestID  string
 }
 
 func (err OCIManifestErr) Error() string {
@@ -79,12 +79,12 @@ func (err OCIManifestErr) Error() string {
 
 // OCILayerSelectionErr is returned when no suitable layer can be found in an OCI manifest.
 type OCILayerSelectionErr struct {
-	Registry         string
-	Repository       string
-	Reference        string
-	AvailableTypes   []string
-	SupportedTypes   []string
-	RequestID        string
+	Registry       string
+	Repository     string
+	Reference      string
+	AvailableTypes []string
+	SupportedTypes []string
+	RequestID      string
 }
 
 func (err OCILayerSelectionErr) Error() string {
@@ -92,14 +92,14 @@ func (err OCILayerSelectionErr) Error() string {
 	if err.Reference != "" {
 		msg += fmt.Sprintf("@%s", err.Reference)
 	}
-	
+
 	if len(err.AvailableTypes) > 0 {
 		msg += fmt.Sprintf(". Available types: %v", err.AvailableTypes)
 	}
 	if len(err.SupportedTypes) > 0 {
 		msg += fmt.Sprintf(". Supported types: %v", err.SupportedTypes)
 	}
-	
+
 	if err.RequestID != "" {
 		msg += fmt.Sprintf(" [request: %s]", err.RequestID)
 	}
@@ -129,12 +129,12 @@ func (err OCIModuleExtractionErr) Error() string {
 	if err.Destination != "" {
 		msg += fmt.Sprintf(" to %s", err.Destination)
 	}
-	
+
 	// Add specific issue description
 	if err.Issue != "" {
 		msg += fmt.Sprintf(": %s", err.Issue)
 	}
-	
+
 	// Add underlying cause if present
 	if err.Cause != nil {
 		if err.Issue != "" {
@@ -143,7 +143,7 @@ func (err OCIModuleExtractionErr) Error() string {
 			msg += fmt.Sprintf(": %v", err.Cause)
 		}
 	}
-	
+
 	if err.RequestID != "" {
 		msg += fmt.Sprintf(" [request: %s]", err.RequestID)
 	}

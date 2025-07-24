@@ -40,7 +40,6 @@ const (
 	ExcludeBlock
 	ErrorsBlock
 	OCIBlock PartialDecodeSectionType = iota
-
 )
 
 // terragruntIncludeMultiple is a struct that can be used to only decode the include block with labels.
@@ -130,8 +129,8 @@ type terragruntEngine struct {
 
 // terragruntOCI is a struct that can only be used to decode the oci block.
 type terragruntOCI struct {
-    OCI    *OCIConfigFile `hcl:"oci,block"`
-    Remain hcl.Body   `hcl:",remain"`
+	OCI    *OCIConfigFile `hcl:"oci,block"`
+	Remain hcl.Body       `hcl:",remain"`
 }
 
 // DecodeBaseBlocks takes in a parsed HCL2 file and decodes the base blocks. Base blocks are blocks that should always
@@ -643,7 +642,7 @@ func PartialParseConfig(ctx *ParsingContext, l log.Logger, file *hclparse.File, 
 			} else {
 				output.Errors = decoded.Errors
 			}
-	    case OCIBlock:
+		case OCIBlock:
 			decoded := terragruntOCI{}
 			if err := file.Decode(&decoded, evalParsingContext); err != nil {
 				return nil, err
@@ -659,7 +658,7 @@ func PartialParseConfig(ctx *ParsingContext, l log.Logger, file *hclparse.File, 
 			if err != nil {
 				return nil, fmt.Errorf("error decoding oci block in partial parse: %w", err)
 			}
-			
+
 			// Validate the OCI configuration
 			if err := ociConfig.Validate(); err != nil {
 				return nil, fmt.Errorf("error validating oci block: %w", err)

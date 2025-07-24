@@ -1,5 +1,5 @@
 // Portions derived from OpenTofu's OCI distribution implementation
-// Copyright (c) The OpenTofu Authors  
+// Copyright (c) The OpenTofu Authors
 // SPDX-License-Identifier: MPL-2.0
 
 package oci
@@ -20,7 +20,7 @@ import (
 func contextAwareSleep(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
-	
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -96,16 +96,16 @@ var _ RepositoryStore = (*orasRepositoryStore)(nil)
 func (r *orasRepositoryStore) Resolve(ctx context.Context, reference string) (ociv1.Descriptor, error) {
 	requestID := OCIRequestIDFromContext(ctx)
 	r.logger.Debugf("[%s] Resolving OCI reference: %s", requestID, reference)
-	
+
 	var desc ociv1.Descriptor
-	
+
 	// Wrap resolve operation with telemetry
 	err := WithOCITelemetry(ctx, r.telemeter, "resolve", r.registry, r.repositoryName, func(ctx context.Context) error {
 		var resolveErr error
 		desc, resolveErr = r.resolveWithRetry(ctx, reference)
 		return resolveErr
 	})
-	
+
 	if err != nil {
 		return ociv1.Descriptor{}, OCIReferenceResolutionError{
 			reference: reference,
@@ -113,7 +113,7 @@ func (r *orasRepositoryStore) Resolve(ctx context.Context, reference string) (oc
 			details:   err.Error(),
 		}
 	}
-	
+
 	r.logger.Debugf("[%s] Resolved OCI reference %s to descriptor: %s", requestID, reference, desc.Digest.String())
 	return desc, nil
 }
@@ -122,16 +122,16 @@ func (r *orasRepositoryStore) Resolve(ctx context.Context, reference string) (oc
 func (r *orasRepositoryStore) resolveWithRetry(ctx context.Context, reference string) (ociv1.Descriptor, error) {
 	requestID := OCIRequestIDFromContext(ctx)
 	retryAttempts := OCIRetryAttemptsFromContext(ctx)
-	
+
 	var desc ociv1.Descriptor
 	var err error
 	var lastErr error
-	
+
 	// Implement retry logic
 	for attempt := 0; attempt <= retryAttempts; attempt++ {
 		if attempt > 0 {
 			r.logger.Tracef("[%s] Retry attempt %d/%d for resolving OCI reference: %s", requestID, attempt, retryAttempts, reference)
-			
+
 			// Check if context is cancelled before retrying
 			select {
 			case <-ctx.Done():
@@ -146,17 +146,17 @@ func (r *orasRepositoryStore) resolveWithRetry(ctx context.Context, reference st
 				}
 			}
 		}
-		
+
 		desc, err = r.repository.Resolve(ctx, reference)
 		if err == nil {
 			// Success, no need to retry
 			break
 		}
-		
+
 		lastErr = err
 		r.logger.Tracef("[%s] Error resolving OCI reference (attempt %d/%d): %v", requestID, attempt+1, retryAttempts+1, err)
 	}
-	
+
 	return desc, lastErr
 }
 
@@ -177,18 +177,18 @@ func (r *orasRepositoryStore) resolveWithRetry(ctx context.Context, reference st
 // Returns a ReadCloser for the blob content, or an error if the fetch fails.
 func (r *orasRepositoryStore) Fetch(ctx context.Context, target ociv1.Descriptor) (io.ReadCloser, error) {
 	requestID := OCIRequestIDFromContext(ctx)
-	r.logger.Debugf("[%s] Fetching OCI blob: digest=%s, mediaType=%s, size=%d", 
+	r.logger.Debugf("[%s] Fetching OCI blob: digest=%s, mediaType=%s, size=%d",
 		requestID, target.Digest.String(), target.MediaType, target.Size)
-	
+
 	var reader io.ReadCloser
-	
+
 	// Wrap fetch operation with telemetry
 	err := WithOCITelemetry(ctx, r.telemeter, "fetch", r.registry, r.repositoryName, func(ctx context.Context) error {
 		var fetchErr error
 		reader, fetchErr = r.fetchWithRetry(ctx, target)
 		return fetchErr
 	})
-	
+
 	if err != nil {
 		return nil, OCIBlobDownloadError{
 			digest:   target.Digest.String(),
@@ -196,7 +196,7 @@ func (r *orasRepositoryStore) Fetch(ctx context.Context, target ociv1.Descriptor
 			details:  err.Error(),
 		}
 	}
-	
+
 	return reader, nil
 }
 
@@ -204,17 +204,17 @@ func (r *orasRepositoryStore) Fetch(ctx context.Context, target ociv1.Descriptor
 func (r *orasRepositoryStore) fetchWithRetry(ctx context.Context, target ociv1.Descriptor) (io.ReadCloser, error) {
 	requestID := OCIRequestIDFromContext(ctx)
 	retryAttempts := OCIRetryAttemptsFromContext(ctx)
-	
+
 	var reader io.ReadCloser
 	var err error
 	var lastErr error
-	
+
 	// Implement retry logic
 	for attempt := 0; attempt <= retryAttempts; attempt++ {
 		if attempt > 0 {
-			r.logger.Tracef("[%s] Retry attempt %d/%d for fetching OCI blob: digest=%s", 
+			r.logger.Tracef("[%s] Retry attempt %d/%d for fetching OCI blob: digest=%s",
 				requestID, attempt, retryAttempts, target.Digest.String())
-			
+
 			// Check if context is cancelled before retrying
 			select {
 			case <-ctx.Done():
@@ -229,16 +229,16 @@ func (r *orasRepositoryStore) fetchWithRetry(ctx context.Context, target ociv1.D
 				}
 			}
 		}
-		
+
 		reader, err = r.repository.Fetch(ctx, target)
 		if err == nil {
 			// Success, no need to retry
 			break
 		}
-		
+
 		lastErr = err
 		r.logger.Tracef("[%s] Error fetching OCI blob (attempt %d/%d): %v", requestID, attempt+1, retryAttempts+1, err)
 	}
-	
+
 	return reader, lastErr
 }

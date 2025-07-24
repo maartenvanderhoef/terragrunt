@@ -14,28 +14,28 @@ type OCIError interface {
 
 // OCIAuthenticationError represents an error that occurred during authentication with an OCI registry.
 type OCIAuthenticationError struct {
-	registry           string
-	reason             string
-	attemptedMethods   []string
+	registry            string
+	reason              string
+	attemptedMethods    []string
 	lastAttemptedMethod string
-	requestID          string
+	requestID           string
 }
 
 func (e OCIAuthenticationError) Error() string {
 	baseMsg := fmt.Sprintf("failed to authenticate with OCI registry %s: %s", e.registry, e.reason)
-	
+
 	if e.lastAttemptedMethod != "" {
 		baseMsg += fmt.Sprintf(" (last attempted method: %s)", e.lastAttemptedMethod)
 	}
-	
+
 	if len(e.attemptedMethods) > 0 {
 		baseMsg += fmt.Sprintf(" (attempted methods: %v)", e.attemptedMethods)
 	}
-	
+
 	if e.requestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.requestID)
 	}
-	
+
 	return baseMsg
 }
 
@@ -101,36 +101,34 @@ func (e OCIBlobDownloadError) OCIError() string {
 	return "blob_download_error"
 }
 
-
-
 // OCIRegistryUnavailableError represents an error when a registry is temporarily unavailable.
 type OCIRegistryUnavailableError struct {
-	Registry    string
-	Cause       error
-	HTTPStatus  int
-	RetryAfter  string // From Retry-After header if available
-	RequestID   string
+	Registry   string
+	Cause      error
+	HTTPStatus int
+	RetryAfter string // From Retry-After header if available
+	RequestID  string
 }
 
 func (e OCIRegistryUnavailableError) Error() string {
 	baseMsg := fmt.Sprintf("OCI registry %s is temporarily unavailable", e.Registry)
-	
+
 	if e.HTTPStatus > 0 {
 		baseMsg += fmt.Sprintf(" (HTTP %d)", e.HTTPStatus)
 	}
-	
+
 	if e.RetryAfter != "" {
 		baseMsg += fmt.Sprintf(" (retry after: %s)", e.RetryAfter)
 	}
-	
+
 	if e.Cause != nil {
 		baseMsg += fmt.Sprintf(": %v", e.Cause)
 	}
-	
+
 	if e.RequestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.RequestID)
 	}
-	
+
 	return baseMsg
 }
 
@@ -152,19 +150,19 @@ type OCICredentialExpiredError struct {
 
 func (e OCICredentialExpiredError) Error() string {
 	baseMsg := fmt.Sprintf("credentials for OCI registry %s have expired", e.Registry)
-	
+
 	if e.Method != "" {
 		baseMsg += fmt.Sprintf(" (method: %s)", e.Method)
 	}
-	
+
 	if e.ExpiresAt != "" {
 		baseMsg += fmt.Sprintf(" (expired at: %s)", e.ExpiresAt)
 	}
-	
+
 	if e.RequestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.RequestID)
 	}
-	
+
 	return baseMsg
 }
 
@@ -184,27 +182,27 @@ type OCIRateLimitError struct {
 
 func (e OCIRateLimitError) Error() string {
 	baseMsg := fmt.Sprintf("rate limit exceeded for OCI registry %s", e.Registry)
-	
+
 	if e.Limit != "" {
 		baseMsg += fmt.Sprintf(" (limit: %s)", e.Limit)
 	}
-	
+
 	if e.Remaining != "" {
 		baseMsg += fmt.Sprintf(" (remaining: %s)", e.Remaining)
 	}
-	
+
 	if e.ResetTime != "" {
 		baseMsg += fmt.Sprintf(" (resets at: %s)", e.ResetTime)
 	}
-	
+
 	if e.RetryAfter != "" {
 		baseMsg += fmt.Sprintf(" (retry after: %s)", e.RetryAfter)
 	}
-	
+
 	if e.RequestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.RequestID)
 	}
-	
+
 	return baseMsg
 }
 
@@ -222,19 +220,19 @@ type OCINetworkError struct {
 
 func (e OCINetworkError) Error() string {
 	baseMsg := fmt.Sprintf("network error connecting to OCI registry %s", e.Registry)
-	
+
 	if e.Operation != "" {
 		baseMsg += fmt.Sprintf(" during %s operation", e.Operation)
 	}
-	
+
 	if e.Cause != nil {
 		baseMsg += fmt.Sprintf(": %v", e.Cause)
 	}
-	
+
 	if e.RequestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.RequestID)
 	}
-	
+
 	return baseMsg
 }
 
@@ -256,19 +254,19 @@ type OCITimeoutError struct {
 
 func (e OCITimeoutError) Error() string {
 	baseMsg := fmt.Sprintf("timeout connecting to OCI registry %s", e.Registry)
-	
+
 	if e.Operation != "" {
 		baseMsg += fmt.Sprintf(" during %s operation", e.Operation)
 	}
-	
+
 	if e.Timeout != "" {
 		baseMsg += fmt.Sprintf(" (timeout: %s)", e.Timeout)
 	}
-	
+
 	if e.RequestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.RequestID)
 	}
-	
+
 	return baseMsg
 }
 
@@ -287,33 +285,29 @@ type OCIPermissionError struct {
 
 func (e OCIPermissionError) Error() string {
 	baseMsg := fmt.Sprintf("permission denied for OCI registry %s", e.Registry)
-	
+
 	if e.Repository != "" {
 		baseMsg += fmt.Sprintf(" repository %s", e.Repository)
 	}
-	
+
 	if e.Operation != "" {
 		baseMsg += fmt.Sprintf(" (%s operation)", e.Operation)
 	}
-	
+
 	if e.HTTPStatus > 0 {
 		baseMsg += fmt.Sprintf(" (HTTP %d)", e.HTTPStatus)
 	}
-	
+
 	if e.RequestID != "" {
 		baseMsg += fmt.Sprintf(" [request: %s]", e.RequestID)
 	}
-	
+
 	return baseMsg
 }
 
 func (e OCIPermissionError) OCIError() string {
 	return "permission_error"
 }
-
-
-
-
 
 // Helper functions for creating specific errors from common scenarios
 
@@ -336,7 +330,7 @@ func NewOCIErrorFromHTTPResponse(registry, repository, operation string, statusC
 			HTTPStatus: statusCode,
 			RequestID:  requestID,
 		}
-		
+
 	case 403:
 		return OCIPermissionError{
 			Registry:   registry,
@@ -345,7 +339,7 @@ func NewOCIErrorFromHTTPResponse(registry, repository, operation string, statusC
 			HTTPStatus: statusCode,
 			RequestID:  requestID,
 		}
-		
+
 	case 404:
 		if repository != "" {
 			return OCIRegistryConnectionError{
@@ -357,7 +351,7 @@ func NewOCIErrorFromHTTPResponse(registry, repository, operation string, statusC
 			registry: registry,
 			details:  fmt.Sprintf("registry endpoint not found (HTTP %d)", statusCode),
 		}
-		
+
 	case 429:
 		return OCIRateLimitError{
 			Registry:   registry,
@@ -367,7 +361,7 @@ func NewOCIErrorFromHTTPResponse(registry, repository, operation string, statusC
 			RetryAfter: headers["Retry-After"],
 			RequestID:  requestID,
 		}
-		
+
 	case 500, 502, 503, 504:
 		return OCIRegistryUnavailableError{
 			Registry:   registry,
@@ -375,7 +369,7 @@ func NewOCIErrorFromHTTPResponse(registry, repository, operation string, statusC
 			RetryAfter: headers["Retry-After"],
 			RequestID:  requestID,
 		}
-		
+
 	default:
 		return OCIRegistryConnectionError{
 			registry: registry,
@@ -403,4 +397,3 @@ func NewOCITimeoutErrorFromContext(registry, operation, timeout string, requestI
 		RequestID: requestID,
 	}
 }
-

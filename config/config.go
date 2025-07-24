@@ -90,7 +90,6 @@ const (
 	MetadataStack                       = "stack"
 	MetadataUnit                        = "unit"
 	MetadataOCI                         = "oci"
-
 )
 
 var (
@@ -671,12 +670,12 @@ type terragruntConfigFile struct {
 	IamAssumeRoleDuration    *int64              `hcl:"iam_assume_role_duration,attr"`
 	IamAssumeRoleSessionName *string             `hcl:"iam_assume_role_session_name,attr"`
 	IamWebIdentityToken      *string             `hcl:"iam_web_identity_token,attr"`
-	OCI                 *OCIConfig            `hcl:"oci,block"`
+	OCI                      *OCIConfig          `hcl:"oci,block"`
 
-	TerragruntDependencies   []Dependency        `hcl:"dependency,block"`
-	FeatureFlags             []*FeatureFlag      `hcl:"feature,block"`
-	Exclude                  *ExcludeConfig      `hcl:"exclude,block"`
-	Errors                   *ErrorsConfig       `hcl:"errors,block"`
+	TerragruntDependencies []Dependency   `hcl:"dependency,block"`
+	FeatureFlags           []*FeatureFlag `hcl:"feature,block"`
+	Exclude                *ExcludeConfig `hcl:"exclude,block"`
+	Errors                 *ErrorsConfig  `hcl:"errors,block"`
 
 	// We allow users to configure code generation via blocks:
 	//
@@ -1320,7 +1319,6 @@ func ParseConfig(ctx *ParsingContext, l log.Logger, file *hclparse.File, include
 
 		ctx.DecodedDependencies = retrievedOutputs
 	}
-	
 
 	evalContext, err := createTerragruntEvalContext(ctx, l, file.ConfigPath)
 	if err != nil {

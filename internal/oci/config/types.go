@@ -11,9 +11,9 @@ import (
 // OCI configuration constants following terragrunt patterns
 const (
 	DefaultOCIDiscoverAmbientCredentials = true
-	DefaultOCICacheCredentials          = true
-	DefaultOCIRetryAttempts            = 3
-    DefaultOCITimeout                  = "30s"
+	DefaultOCICacheCredentials           = true
+	DefaultOCIRetryAttempts              = 3
+	DefaultOCITimeout                    = "30s"
 )
 
 // OCIConfig represents the OCI configuration block in terragrunt.hcl
@@ -31,7 +31,7 @@ type OCIConfig struct {
 	DockerConfigFiles []string `hcl:"docker_config_files,attr" cty:"docker_config_files"`
 
 	// CredentialHelpers specifies which Docker credential helpers to try
-	// in order of preference. Common values: "desktop", "osxkeychain", 
+	// in order of preference. Common values: "desktop", "osxkeychain",
 	// "wincred", "pass", "secretservice"
 	CredentialHelpers []string `hcl:"credential_helpers,attr" cty:"credential_helpers"`
 
@@ -87,16 +87,16 @@ type OCICredentialsConfig struct {
 	// DisableAuth explicitly disables authentication for this registry (priority 5)
 	// Useful for public registries or to override global settings
 	DisableAuth *bool `hcl:"disable_auth,optional" cty:"disable_auth"`
-	
+
 	// Timeout specifies the maximum time to wait for registry operations.
 	// Supports duration strings like "30s", "1m", "5m30s".
 	// Overrides the global timeout for this specific registry.
 	Timeout *string `hcl:"timeout,optional" cty:"timeout"`
-	
+
 	// RetryAttempts specifies the number of retry attempts for failed
 	// registry operations. Overrides the global retry attempts for this specific registry.
 	RetryAttempts *int `hcl:"retry_attempts,optional" cty:"retry_attempts"`
-	
+
 	// CacheCredentials enables caching of authentication tokens to avoid
 	// repeated authentication requests during a single terragrunt run.
 	// Overrides the global cache credentials setting for this specific registry.
@@ -108,17 +108,17 @@ func (cfg *OCIConfig) String() string {
 	if cfg == nil {
 		return "OCIConfig{<nil>}"
 	}
-	
+
 	timeout := ""
 	if cfg.Timeout != nil {
 		timeout = *cfg.Timeout
 	}
-	
+
 	retryAttempts := ""
 	if cfg.RetryAttempts != nil {
 		retryAttempts = fmt.Sprintf("%d", *cfg.RetryAttempts)
 	}
-	
+
 	return fmt.Sprintf(
 		"OCIConfig{DiscoverAmbientCredentials = %v, DockerConfigFiles = %v, CredentialHelpers = %v, Timeout = %s, RetryAttempts = %s, Credentials = %d}",
 		cfg.DiscoverAmbientCredentials,
@@ -142,22 +142,22 @@ func (cfg *OCICredentialsConfig) String() string {
 	if cfg.CredentialHelper != nil {
 		credHelper = *cfg.CredentialHelper
 	}
-	
+
 	timeout := ""
 	if cfg.Timeout != nil {
 		timeout = *cfg.Timeout
 	}
-	
+
 	retryAttempts := ""
 	if cfg.RetryAttempts != nil {
 		retryAttempts = fmt.Sprintf("%d", *cfg.RetryAttempts)
 	}
-	
+
 	cacheCredentials := ""
 	if cfg.CacheCredentials != nil {
 		cacheCredentials = fmt.Sprintf("%t", *cfg.CacheCredentials)
 	}
-	
+
 	return fmt.Sprintf(
 		"OCICredentialsConfig{Registry = %s, Username = %s, HasPassword = %t, HasToken = %t, CredentialHelper = %s, HasTokenCommand = %t, Timeout = %s, RetryAttempts = %s, CacheCredentials = %s}",
 		cfg.Registry,
@@ -204,7 +204,7 @@ func (cfg *OCIConfig) Validate() error {
 // Following OpenTofu's approach, multiple authentication methods are allowed
 // and will be tried in priority order at runtime.
 func (cfg *OCICredentialsConfig) Validate() error {
-    //fmt.Errorf("username %s password %s", cfg.Username, cfg.Password)
+	//fmt.Errorf("username %s password %s", cfg.Username, cfg.Password)
 	if cfg.Registry == "" {
 		return fmt.Errorf("registry hostname cannot be empty")
 	}
@@ -256,7 +256,7 @@ func (cfg *OCIConfig) GetCacheCredentials(registry ...string) bool {
 			return *creds.CacheCredentials
 		}
 	}
-	
+
 	// Use global cache credentials
 	if cfg == nil || cfg.CacheCredentials == nil {
 		return DefaultOCICacheCredentials
@@ -272,16 +272,16 @@ func (cfg *OCIConfig) GetDockerConfigFiles() []string {
 	if cfg == nil {
 		return DefaultDockerConfigFiles()
 	}
-	
+
 	if cfg.DockerConfigFiles == nil {
 		return DefaultDockerConfigFiles()
 	}
-	
+
 	// Empty slice means explicitly disable Docker config file discovery
 	if len(cfg.DockerConfigFiles) == 0 {
 		return []string{}
 	}
-	
+
 	// Expand paths with ~ and environment variables
 	return ExpandPaths(cfg.DockerConfigFiles)
 }
@@ -297,7 +297,7 @@ func (cfg *OCIConfig) GetRetryAttempts(registry ...string) int {
 			return *creds.RetryAttempts
 		}
 	}
-	
+
 	// Use global retry attempts
 	if cfg == nil || cfg.RetryAttempts == nil {
 		return DefaultOCIRetryAttempts
@@ -328,20 +328,20 @@ func (cfg *OCIConfig) GetTimeoutDuration(registry ...string) time.Duration {
 			duration, err := time.ParseDuration(*creds.Timeout)
 			if err != nil {
 				// This should have been caught by Validate(), but provide a fallback
-				log.Printf("[WARN] Invalid OCI timeout format %q for registry %s, using global timeout. This should have been caught by validation.", 
+				log.Printf("[WARN] Invalid OCI timeout format %q for registry %s, using global timeout. This should have been caught by validation.",
 					*creds.Timeout, registry[0])
 			} else {
 				return duration
 			}
 		}
 	}
-	
+
 	// Use global timeout
 	if cfg == nil || cfg.Timeout == nil || *cfg.Timeout == "" {
 		duration, _ := time.ParseDuration(DefaultOCITimeout)
 		return duration
 	}
-	
+
 	duration, err := time.ParseDuration(*cfg.Timeout)
 	if err != nil {
 		// This should have been caught by Validate(), but provide a fallback
@@ -350,7 +350,7 @@ func (cfg *OCIConfig) GetTimeoutDuration(registry ...string) time.Duration {
 		fallback, _ := time.ParseDuration(DefaultOCITimeout)
 		return fallback
 	}
-	
+
 	return duration
 }
 
@@ -375,13 +375,13 @@ func (cfg *OCIConfig) FindCredentialsForRegistry(registry string) *OCICredential
 
 	for i := range cfg.Credentials {
 		cred := &cfg.Credentials[i]
-		
+
 		// Exact match takes highest priority
 		if cred.Registry == registry {
 			exactMatch = cred
 			break
 		}
-		
+
 		// Wildcard match (e.g., "*.company.com" matches "registry.company.com")
 		if wildcardMatch == nil && matchesWildcard(cred.Registry, registry) {
 			wildcardMatch = cred
@@ -433,17 +433,17 @@ func matchesWildcard(pattern, hostname string) bool {
 	if len(pattern) == 0 {
 		return false
 	}
-	
+
 	// If pattern doesn't contain wildcards, it must be an exact match
 	if pattern[0] != '*' {
 		return pattern == hostname
 	}
-	
+
 	// Handle patterns like "*.company.com"
 	if len(pattern) < 2 || pattern[1] != '.' {
 		return false
 	}
-	
+
 	suffix := pattern[2:] // Remove "*."
 	return len(hostname) > len(suffix) && hostname[len(hostname)-len(suffix):] == suffix
 }
@@ -471,19 +471,19 @@ func MergeOciConfig(parent, child *OCIConfig) *OCIConfig {
 	} else {
 		merged.CacheCredentials = parent.CacheCredentials
 	}
-    
+
 	if child.Timeout != nil {
 		merged.Timeout = child.Timeout
 	} else {
 		merged.Timeout = parent.Timeout
 	}
-    
+
 	if child.RetryAttempts != nil {
 		merged.RetryAttempts = child.RetryAttempts
 	} else {
 		merged.RetryAttempts = parent.RetryAttempts
 	}
-    
+
 	if child.DefaultCredentialHelper != nil {
 		merged.DefaultCredentialHelper = child.DefaultCredentialHelper
 	} else {

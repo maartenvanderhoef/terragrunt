@@ -3,8 +3,8 @@ package config
 import (
 	"fmt"
 
-	ociconfig "github.com/gruntwork-io/terragrunt/internal/oci/config"
 	"github.com/gruntwork-io/terragrunt/internal/ctyhelper"
+	ociconfig "github.com/gruntwork-io/terragrunt/internal/oci/config"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -16,13 +16,13 @@ type OCICredentialsConfig = ociconfig.OCICredentialsConfig
 // OCIConfigFile represents the OCI configuration as parsed from HCL
 // This struct handles the cty.Value types used during HCL parsing
 type OCIConfigFile struct {
-	DiscoverAmbientCredentials *bool      `hcl:"discover_ambient_credentials,optional"`
-	DockerConfigFiles          *cty.Value `hcl:"docker_config_files,optional"`
-	CredentialHelpers          *cty.Value `hcl:"credential_helpers,optional"`
-	DefaultCredentialHelper    *string    `hcl:"default_credential_helper,optional"`
-	CacheCredentials           *bool      `hcl:"cache_credentials,optional"`
-	Timeout                    *string    `hcl:"timeout,optional"`
-	RetryAttempts              *int       `hcl:"retry_attempts,optional"`
+	DiscoverAmbientCredentials *bool                      `hcl:"discover_ambient_credentials,optional"`
+	DockerConfigFiles          *cty.Value                 `hcl:"docker_config_files,optional"`
+	CredentialHelpers          *cty.Value                 `hcl:"credential_helpers,optional"`
+	DefaultCredentialHelper    *string                    `hcl:"default_credential_helper,optional"`
+	CacheCredentials           *bool                      `hcl:"cache_credentials,optional"`
+	Timeout                    *string                    `hcl:"timeout,optional"`
+	RetryAttempts              *int                       `hcl:"retry_attempts,optional"`
 	Credentials                []OCICredentialsConfigFile `hcl:"credentials,block"`
 }
 

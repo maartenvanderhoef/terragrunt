@@ -48,11 +48,11 @@ func TestMergeOciConfig(t *testing.T) {
 				// CacheCredentials and Timeout not set in child
 			},
 			expected: &OCIConfig{
-				DiscoverAmbientCredentials: boolPtr(false), // From child
-				CacheCredentials:           boolPtr(true),  // From parent
-				RetryAttempts:              intPtr(5),      // From child
-				Timeout:                    strPtr("30s"),  // From parent
-				DefaultCredentialHelper:    strPtr("parent-helper"), // From parent
+				DiscoverAmbientCredentials: boolPtr(false),           // From child
+				CacheCredentials:           boolPtr(true),            // From parent
+				RetryAttempts:              intPtr(5),                // From child
+				Timeout:                    strPtr("30s"),            // From parent
+				DefaultCredentialHelper:    strPtr("parent-helper"),  // From parent
 				Credentials:                []OCICredentialsConfig{}, // Empty slice
 			},
 		},
@@ -71,10 +71,10 @@ func TestMergeOciConfig(t *testing.T) {
 				Timeout:                    strPtr(""),
 			},
 			expected: &OCIConfig{
-				DiscoverAmbientCredentials: boolPtr(false), // From child
-				CacheCredentials:           boolPtr(false), // From child
-				RetryAttempts:              intPtr(0),      // From child
-				Timeout:                    strPtr(""),     // From child
+				DiscoverAmbientCredentials: boolPtr(false),           // From child
+				CacheCredentials:           boolPtr(false),           // From child
+				RetryAttempts:              intPtr(0),                // From child
+				Timeout:                    strPtr(""),               // From child
 				Credentials:                []OCICredentialsConfig{}, // Empty slice
 			},
 		},
@@ -89,9 +89,9 @@ func TestMergeOciConfig(t *testing.T) {
 				// CredentialHelpers not set in child
 			},
 			expected: &OCIConfig{
-				DockerConfigFiles: []string{"child1", "child2"},       // From child
+				DockerConfigFiles: []string{"child1", "child2"},                 // From child
 				CredentialHelpers: []string{"parent-helper1", "parent-helper2"}, // From parent
-				Credentials:       []OCICredentialsConfig{}, // Empty slice
+				Credentials:       []OCICredentialsConfig{},                     // Empty slice
 			},
 		},
 		{
@@ -105,8 +105,8 @@ func TestMergeOciConfig(t *testing.T) {
 				CredentialHelpers: []string{},
 			},
 			expected: &OCIConfig{
-				DockerConfigFiles: []string{}, // Empty slice from child
-				CredentialHelpers: []string{}, // Empty slice from child
+				DockerConfigFiles: []string{},               // Empty slice from child
+				CredentialHelpers: []string{},               // Empty slice from child
 				Credentials:       []OCICredentialsConfig{}, // Empty slice
 			},
 		},
@@ -182,11 +182,11 @@ func TestMergeOciConfig(t *testing.T) {
 						CredentialHelper: strPtr("child-helper"),
 					},
 					{
-						Registry:    "command-auth.com",
+						Registry:     "command-auth.com",
 						TokenCommand: []string{"echo", "token"},
 					},
 					{
-						Registry:    "token-auth.com",
+						Registry:     "token-auth.com",
 						TokenCommand: []string{"echo", "child-token"},
 					},
 				},
@@ -199,7 +199,7 @@ func TestMergeOciConfig(t *testing.T) {
 						Password: strPtr("parent-pass"),
 					},
 					{
-						Registry:    "command-auth.com",
+						Registry:     "command-auth.com",
 						TokenCommand: []string{"echo", "token"},
 					},
 					{
@@ -207,7 +207,7 @@ func TestMergeOciConfig(t *testing.T) {
 						CredentialHelper: strPtr("child-helper"),
 					},
 					{
-						Registry:    "token-auth.com",
+						Registry:     "token-auth.com",
 						TokenCommand: []string{"echo", "child-token"},
 					},
 				},
@@ -367,13 +367,13 @@ func TestMergeOciConfig(t *testing.T) {
 			parent: &OCIConfig{
 				Credentials: []OCICredentialsConfig{
 					{
-						Registry: "registry.com",
-						Username: strPtr("parent-user"),
-						Password: strPtr("parent-pass"),
-						Token:    strPtr("parent-token"),
+						Registry:         "registry.com",
+						Username:         strPtr("parent-user"),
+						Password:         strPtr("parent-pass"),
+						Token:            strPtr("parent-token"),
 						CredentialHelper: strPtr("parent-helper"),
-						TokenCommand: []string{"echo", "parent-token"},
-						DisableAuth: boolPtr(false),
+						TokenCommand:     []string{"echo", "parent-token"},
+						DisableAuth:      boolPtr(false),
 					},
 				},
 			},

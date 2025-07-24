@@ -482,14 +482,14 @@ type ctyCatalogConfig struct {
 // CtyOCIConfig is an alternate representation of OCIConfig that converts the list of
 // credentials blocks into a map from the registry name to the credential details.
 type CtyOCIConfig struct {
-	DiscoverAmbientCredentials *bool                             `cty:"discover_ambient_credentials"`
-	DockerConfigFiles          []string                          `cty:"docker_config_files"`
-	CredentialHelpers          []string                          `cty:"credential_helpers"`
-	DefaultCredentialHelper    *string                           `cty:"default_credential_helper"`
-	CacheCredentials           *bool                             `cty:"cache_credentials"`
-	Timeout                    *string                           `cty:"timeout"`
-	RetryAttempts              *int                              `cty:"retry_attempts"`
-	Credentials                map[string]OCICredentialsConfig   `cty:"credentials"`
+	DiscoverAmbientCredentials *bool                           `cty:"discover_ambient_credentials"`
+	DockerConfigFiles          []string                        `cty:"docker_config_files"`
+	CredentialHelpers          []string                        `cty:"credential_helpers"`
+	DefaultCredentialHelper    *string                         `cty:"default_credential_helper"`
+	CacheCredentials           *bool                           `cty:"cache_credentials"`
+	Timeout                    *string                         `cty:"timeout"`
+	RetryAttempts              *int                            `cty:"retry_attempts"`
+	Credentials                map[string]OCICredentialsConfig `cty:"credentials"`
 }
 
 // ctyEngineConfig is an alternate representation of EngineConfig that converts internal blocks into a map that

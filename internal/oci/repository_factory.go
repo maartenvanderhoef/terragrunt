@@ -1,5 +1,5 @@
 // Portions derived from OpenTofu's OCI distribution implementation
-// Copyright (c) The OpenTofu Authors  
+// Copyright (c) The OpenTofu Authors
 // SPDX-License-Identifier: MPL-2.0
 
 package oci
@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+
 	orasRemote "oras.land/oras-go/v2/registry/remote"
 
 	"github.com/gruntwork-io/terragrunt/internal/cache"
@@ -29,8 +30,6 @@ type ctxKey byte
 
 // Global cache instance - shared across all factories for better performance
 var globalRepositoryCache = cache.NewCache[RepositoryStore](ociRepositoryCacheName)
-
-
 
 // ContextWithOCIRequestID adds a request ID to the context for tracing
 func ContextWithOCIRequestID(ctx context.Context, requestID string) context.Context {
@@ -76,16 +75,16 @@ type RepositoryStoreFactory interface {
 type DefaultRepositoryStoreFactory struct {
 	// OCIConfig contains the OCI configuration from terragrunt.hcl
 	OCIConfig *ociconfig.OCIConfig
-	
+
 	// AuthFactory is used to create authenticated clients for registry access
 	AuthFactory AuthClientFactory
-	
+
 	// Logger is used for debug output
 	Logger log.Logger
-	
+
 	// Telemeter provides telemetry collection for operations
 	Telemeter *telemetry.Telemeter
-	
+
 	// HealthChecker provides registry health checking capabilities
 	HealthChecker *RegistryHealthChecker
 }
@@ -100,14 +99,14 @@ type DefaultRepositoryStoreFactory struct {
 //   - Provides telemetry through cache operations
 //
 // Connection setup process:
-//   1. Set up timeout context from OCI configuration
-//   2. Add request ID for tracing
-//   3. Check global cache for existing connection
-//   4. Create new ORAS registry instance with timeout context
-//   5. Configure authentication using AuthClientFactory
-//   6. Validate connectivity with registry.Ping() (respects cancellation)
-//   7. Create repository instance
-//   8. Store in global cache for future use
+//  1. Set up timeout context from OCI configuration
+//  2. Add request ID for tracing
+//  3. Check global cache for existing connection
+//  4. Create new ORAS registry instance with timeout context
+//  5. Configure authentication using AuthClientFactory
+//  6. Validate connectivity with registry.Ping() (respects cancellation)
+//  7. Create repository instance
+//  8. Store in global cache for future use
 //
 // Parameters:
 //   - ctx: Context for cancellation, timeout, and request scoping
@@ -120,7 +119,7 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 	// Create request ID for tracing
 	requestID := fmt.Sprintf("oci-repo-%s-%s-%d", registryDomain, repositoryName, time.Now().UnixNano())
 	ctx = ContextWithOCIRequestID(ctx, requestID)
-	
+
 	// Apply timeout from OCI configuration if specified
 	if f.OCIConfig != nil {
 		if timeoutDuration := f.OCIConfig.GetTimeoutDurationForRegistry(registryDomain); timeoutDuration > 0 {
@@ -129,38 +128,38 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 			defer cancel()
 			f.Logger.Debugf("[%s] Applied timeout for registry %s: %v", requestID, registryDomain, timeoutDuration)
 		}
-		
+
 		// Add registry-specific retry attempts to context
 		retryAttempts := f.OCIConfig.GetRetryAttemptsForRegistry(registryDomain)
 		ctx = ContextWithOCIRetryAttempts(ctx, retryAttempts)
 		f.Logger.Tracef("[%s] Using retry attempts for registry %s: %d", requestID, registryDomain, retryAttempts)
 	}
-	
+
 	// Create composite cache key
 	key := fmt.Sprintf("%s/%s", registryDomain, repositoryName)
-	
+
 	// Check for cancellation before cache operation
 	select {
 	case <-ctx.Done():
 		return nil, NewOCITimeoutErrorFromContext(registryDomain, "cache_lookup", "context cancelled", requestID)
 	default:
 	}
-	
+
 	// Try to get from global cache first - this provides automatic telemetry
 	if store, found := globalRepositoryCache.Get(ctx, key); found {
 		f.Logger.Debugf("[%s] Found OCI repository store in global cache for %s", requestID, key)
 		return store, nil
 	}
-	
+
 	f.Logger.Debugf("[%s] Creating new OCI repository store for %s/%s", requestID, registryDomain, repositoryName)
-	
+
 	// Check for cancellation before expensive registry operations
 	select {
 	case <-ctx.Done():
 		return nil, NewOCITimeoutErrorFromContext(registryDomain, "registry_creation", "context cancelled", requestID)
 	default:
 	}
-	
+
 	// Create ORAS registry with context support
 	registry, err := orasRemote.NewRegistry(registryDomain)
 	if err != nil {
@@ -169,55 +168,55 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 			details:  fmt.Sprintf("[%s] failed to create registry: %v", requestID, err),
 		}
 	}
-	
+
 	// Set up authentication with context
 	authClient, err := f.AuthFactory.CreateAuthClient(ctx, registryDomain)
 	if err != nil {
 		return nil, fmt.Errorf("[%s] authentication failed: %w", requestID, err)
 	}
 	registry.Client = authClient
-	
+
 	// Check for cancellation before ping (network operation)
 	select {
 	case <-ctx.Done():
 		return nil, NewOCITimeoutErrorFromContext(registryDomain, "registry_ping", "context cancelled", requestID)
 	default:
 	}
-	
+
 	// Perform comprehensive health check before ping
 	if f.HealthChecker != nil {
 		f.Logger.Debugf("[%s] Performing health check for %s", requestID, registryDomain)
 		healthStatus := f.HealthChecker.CheckRegistryHealth(ctx, registryDomain)
-		
+
 		if !healthStatus.Available {
 			suggestions := GetHealthCheckSuggestions(healthStatus)
-			details := fmt.Sprintf("[%s] health check failed: %s. Suggestions: %v", 
+			details := fmt.Sprintf("[%s] health check failed: %s. Suggestions: %v",
 				requestID, healthStatus.Details, suggestions)
-			
+
 			return nil, OCIRegistryConnectionError{
 				registry: registryDomain,
 				details:  details,
 			}
 		}
-		
-		f.Logger.Debugf("[%s] Health check passed for %s (response time: %v)", 
+
+		f.Logger.Debugf("[%s] Health check passed for %s (response time: %v)",
 			requestID, registryDomain, healthStatus.ResponseTime)
 	}
-	
+
 	// Test connection with ping - this respects context cancellation
 	f.Logger.Debugf("[%s] Testing connectivity to %s", requestID, registryDomain)
-	
+
 	err = WithOCITelemetry(ctx, f.Telemeter, "registry_ping", registryDomain, "", func(ctx context.Context) error {
 		return registry.Ping(ctx)
 	})
-	
+
 	if err != nil {
 		return nil, OCIRegistryConnectionError{
 			registry: registryDomain,
 			details:  fmt.Sprintf("[%s] ping failed: %v", requestID, err),
 		}
 	}
-	
+
 	// Create repository with context support
 	repo, err := registry.Repository(ctx, repositoryName)
 	if err != nil {
@@ -227,7 +226,7 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 			details:    fmt.Sprintf("[%s] repository creation failed: %v", requestID, err),
 		}
 	}
-	
+
 	// Create the store wrapper
 	store := &orasRepositoryStore{
 		repository:     repo,
@@ -236,7 +235,7 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 		logger:         f.Logger,
 		telemeter:      f.Telemeter,
 	}
-	
+
 	// Final cancellation check before caching
 	select {
 	case <-ctx.Done():
@@ -245,11 +244,11 @@ func (f *DefaultRepositoryStoreFactory) CreateRepositoryStore(ctx context.Contex
 		return store, nil
 	default:
 	}
-	
+
 	// Cache globally using the generic cache - this provides automatic telemetry
 	globalRepositoryCache.Put(ctx, key, store)
 	f.Logger.Debugf("[%s] Successfully created and cached OCI repository store globally for %s", requestID, key)
-	
+
 	return store, nil
 }
 
@@ -266,9 +265,9 @@ func NewRepositoryStoreFactoryWithTelemetry(ociConfig *ociconfig.OCIConfig, logg
 		OCIConfig: ociConfig,
 		Logger:    logger,
 	}
-	
+
 	healthChecker := NewRegistryHealthChecker(logger, telemeter)
-	
+
 	return &DefaultRepositoryStoreFactory{
 		OCIConfig:     ociConfig,
 		AuthFactory:   authFactory,

@@ -1,5 +1,5 @@
 // Portions derived from OpenTofu's OCI distribution implementation
-// Copyright (c) The OpenTofu Authors  
+// Copyright (c) The OpenTofu Authors
 // SPDX-License-Identifier: MPL-2.0
 
 package tf
@@ -27,9 +27,9 @@ import (
 
 // Constants for OCI module packages
 const (
-    ociAuthTokenEnvName              = "TG_OCI_REGISTRY_TOKEN"
-    ociImageManifestArtifactType     = "application/vnd.opentofu.modulepkg"
-    ociImageManifestSizeLimitMiB     = 4
+	ociAuthTokenEnvName          = "TG_OCI_REGISTRY_TOKEN"
+	ociImageManifestArtifactType = "application/vnd.opentofu.modulepkg"
+	ociImageManifestSizeLimitMiB = 4
 )
 
 // ociBlobMediaTypePreference describes our preference order for the media
@@ -51,8 +51,9 @@ type OCIRepositoryStore = oci.RepositoryStore
 // to seamlessly integrate with Terragrunt's existing module download infrastructure.
 //
 // This getter supports URLs in the format:
-//   oci://REGISTRY_DOMAIN/REPOSITORY_PATH?tag=TAG
-//   oci://REGISTRY_DOMAIN/REPOSITORY_PATH?digest=DIGEST
+//
+//	oci://REGISTRY_DOMAIN/REPOSITORY_PATH?tag=TAG
+//	oci://REGISTRY_DOMAIN/REPOSITORY_PATH?digest=DIGEST
 //
 // Where:
 //   - REGISTRY_DOMAIN is the OCI registry endpoint (e.g., registry.example.com)
@@ -61,9 +62,9 @@ type OCIRepositoryStore = oci.RepositoryStore
 //   - DIGEST specifies a content digest (e.g., sha256:abc123...)
 //
 // Authentication is handled through multiple methods in priority order:
-//   1. Terraform CLI configuration (~/.terraformrc or equivalent)
-//   2. TG_OCI_REGISTRY_TOKEN environment variable
-//   3. No authentication (for public registries)
+//  1. Terraform CLI configuration (~/.terraformrc or equivalent)
+//  2. TG_OCI_REGISTRY_TOKEN environment variable
+//  3. No authentication (for public registries)
 //
 // The getter validates OCI manifests, downloads module packages, and extracts
 // them to the destination directory following the same patterns as other
@@ -111,13 +112,13 @@ func (og *OCIGetter) ClientMode(u *url.URL) (getter.ClientMode, error) {
 // This is the main entry point for the getter and orchestrates the entire download process.
 //
 // The method performs these steps:
-//   1. Parse and validate the OCI URL
-//   2. Create an authenticated repository store
-//   3. Resolve the tag or digest to a manifest descriptor
-//   4. Fetch and validate the OCI image manifest
-//   5. Select the appropriate layer blob containing the module
-//   6. Download the blob to a temporary file
-//   7. Extract the module contents to the destination directory
+//  1. Parse and validate the OCI URL
+//  2. Create an authenticated repository store
+//  3. Resolve the tag or digest to a manifest descriptor
+//  4. Fetch and validate the OCI image manifest
+//  5. Select the appropriate layer blob containing the module
+//  6. Download the blob to a temporary file
+//  7. Extract the module contents to the destination directory
 //
 // Parameters:
 //   - dstPath: Local filesystem path where the module should be extracted
@@ -245,7 +246,7 @@ func (og *OCIGetter) GetFile(dst string, src *url.URL) error {
 // Returns a validated ORAS registry reference or an error if the URL format is invalid.
 func (og *OCIGetter) resolveRepositoryRef(srcURL *url.URL, requestID string) (*orasRegistry.Reference, error) {
 	og.Logger.Tracef("[%s] Parsing OCI URL: %s", requestID, srcURL.String())
-	
+
 	if !srcURL.IsAbs() {
 		return nil, OCIURLParseErr{
 			URL:       srcURL.String(),
@@ -439,7 +440,7 @@ func (og *OCIGetter) fetchOCIImageManifest(ctx context.Context, desc ociv1.Descr
 		}
 		return nil, OCIManifestErr{
 			Registry:   "unknown",
-			Repository: "unknown", 
+			Repository: "unknown",
 			Issue:      fmt.Sprintf("invalid manifest content: %v", err),
 			RequestID:  requestID,
 		}
@@ -522,7 +523,7 @@ func (og *OCIGetter) selectOCILayerBlob(descs []ociv1.Descriptor, requestID stri
 
 	for _, desc := range descs {
 		availableTypes = append(availableTypes, desc.MediaType)
-		
+
 		if _, ok := ociDecompressorMediaTypes[desc.MediaType]; ok {
 			if _, exists := foundBlobs[desc.MediaType]; exists {
 				return ociv1.Descriptor{}, OCILayerSelectionErr{
@@ -540,7 +541,7 @@ func (og *OCIGetter) selectOCILayerBlob(descs []ociv1.Descriptor, requestID stri
 	if len(foundBlobs) == 0 {
 		return ociv1.Descriptor{}, OCILayerSelectionErr{
 			Registry:       "unknown",
-			Repository:     "unknown", 
+			Repository:     "unknown",
 			AvailableTypes: availableTypes,
 			SupportedTypes: supportedTypes,
 			RequestID:      requestID,

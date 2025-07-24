@@ -25,7 +25,7 @@ func TestOCIConfigFileDecode(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:  "basic config with scalar values",
+			name: "basic config with scalar values",
 			input: &OCIConfigFile{
 				DiscoverAmbientCredentials: boolPtr(true),
 				CacheCredentials:           boolPtr(false),
@@ -76,9 +76,9 @@ func TestOCIConfigFileDecode(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			result, err := test.input.Decode(&hcl.EvalContext{})
-			
+
 			if test.hasError {
 				require.Error(t, err)
 			} else {
@@ -152,11 +152,11 @@ func TestOCICredentialsConfigFileDecoding(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			configFile := &OCIConfigFile{
 				Credentials: []OCICredentialsConfigFile{test.input},
 			}
-			
+
 			result, err := configFile.Decode(&hcl.EvalContext{})
 			require.NoError(t, err)
 			require.Len(t, result.Credentials, 1)
@@ -173,7 +173,7 @@ func TestOCIConfigFileDecodeWithValidCtyValues(t *testing.T) {
 		cty.StringVal("~/.docker/config.json"),
 		cty.StringVal("/etc/docker/config.json"),
 	})
-	
+
 	credentialHelpers := cty.ListVal([]cty.Value{
 		cty.StringVal("desktop"),
 		cty.StringVal("osxkeychain"),
@@ -198,7 +198,7 @@ func TestOCIConfigFileDecodeWithValidCtyValues(t *testing.T) {
 
 	result, err := configFile.Decode(&hcl.EvalContext{})
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, []string{"~/.docker/config.json", "/etc/docker/config.json"}, result.DockerConfigFiles)
 	assert.Equal(t, []string{"desktop", "osxkeychain"}, result.CredentialHelpers)
 	require.Len(t, result.Credentials, 1)

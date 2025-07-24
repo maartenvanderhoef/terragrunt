@@ -1,5 +1,5 @@
 // Portions derived from OpenTofu's OCI distribution implementation
-// Copyright (c) The OpenTofu Authors  
+// Copyright (c) The OpenTofu Authors
 // SPDX-License-Identifier: MPL-2.0
 
 package run
@@ -266,7 +266,6 @@ func UpdateGetters(terragruntOptions *options.TerragruntOptions, terragruntConfi
 		client.Getters["tfr"] = &tf.RegistryGetter{
 			TerragruntOptions: terragruntOptions,
 			Logger:            l,
-
 		}
 
 		if terragruntOptions.Experiments.Evaluate(experiment.OCIRegistry) {

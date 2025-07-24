@@ -108,6 +108,7 @@ func UpdateUnknownCtyValValues(value cty.Value) (cty.Value, error) {
 
 	return value, nil
 }
+
 // ParseCtyValueToStringSlice converts a cty.Value to a []string.
 // This function handles both list and tuple types, and ensures all values are strings.
 func ParseCtyValueToStringSlice(value cty.Value) ([]string, error) {
