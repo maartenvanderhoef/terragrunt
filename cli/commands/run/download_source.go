@@ -1,3 +1,7 @@
+// Portions derived from OpenTofu's OCI distribution implementation
+// Copyright (c) The OpenTofu Authors  
+// SPDX-License-Identifier: MPL-2.0
+
 package run
 
 import (
@@ -229,14 +233,7 @@ func readVersionFile(terraformSource *tf.Source) (string, error) {
 	return util.ReadFileAsString(terraformSource.VersionFile)
 }
 
-// UpdateGetters returns the customized go-getter interfaces that Terragrunt relies on. Specifically:
-//   - Local file path getter is updated to copy the files instead of creating symlinks, which is what go-getter defaults
-//     to.
-//   - Include the customized getter for fetching sources from the Terraform Registry.
-//
-// This creates a closure that returns a function so that we have access to the terragrunt configuration, which is
-// necessary for customizing the behavior of the file getter.
-func UpdateGetters(terragruntOptions *options.TerragruntOptions, terragruntConfig *config.TerragruntConfig) func(*getter.Client) error {
+func UpdateGetters(terragruntOptions *options.TerragruntOptions, terragruntConfig *config.TerragruntConfig, l log.Logger) func(*getter.Client) error {
 	return func(client *getter.Client) error {
 		// We copy all the default getters from the go-getter library, but replace the "file" getter. We shallow clone the
 		// getter map here rather than using getter.Getters directly because (a) we shouldn't change the original,
@@ -268,6 +265,15 @@ func UpdateGetters(terragruntOptions *options.TerragruntOptions, terragruntConfi
 		// Load in custom getters that are only supported in Terragrunt
 		client.Getters["tfr"] = &tf.RegistryGetter{
 			TerragruntOptions: terragruntOptions,
+			Logger:            l,
+
+		}
+
+		if terragruntOptions.Experiments.Evaluate(experiment.OCIRegistry) {
+			client.Getters["oci"] = &tf.OCIGetter{
+				TerragruntOptions: terragruntOptions,
+				Logger:            l,
+			}
 		}
 
 		return nil
@@ -323,7 +329,7 @@ func downloadSource(ctx context.Context, l log.Logger, src *tf.Source, opts *opt
 
 	// Fallback to standard go-getter
 	return opts.RunWithErrorHandling(ctx, l, r, func() error {
-		return getter.GetAny(src.DownloadDir, src.CanonicalSourceURL.String(), UpdateGetters(opts, cfg))
+		return getter.GetAny(src.DownloadDir, src.CanonicalSourceURL.String(), UpdateGetters(opts, cfg, l))
 	})
 }
 

@@ -32,6 +32,9 @@ const (
 	//
 	// Only works with OpenTofu version >= 1.10.
 	AutoProviderCacheDir = "auto-provider-cache-dir"
+
+	// OCI Registry getter
+	OCIRegistry = "oci-registry"
 )
 
 const (
@@ -71,6 +74,9 @@ func NewExperiments() Experiments {
 		{
 			Name: AutoProviderCacheDir,
 		},
+		{
+            Name: OCIRegistry,  // Add this
+        },
 	}
 }
 

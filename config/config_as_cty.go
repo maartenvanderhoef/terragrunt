@@ -50,6 +50,15 @@ func TerragruntConfigAsCty(config *TerragruntConfig) (cty.Value, error) {
 		output[MetadataEngine] = engineConfigCty
 	}
 
+	ociConfigCty, err := ociConfigAsCty(config.OCI)
+	if err != nil {
+		return cty.NilVal, err
+	}
+
+	if ociConfigCty != cty.NilVal {
+		output[MetadataOCI] = ociConfigCty
+	}
+
 	excludeConfigCty, err := excludeConfigAsCty(config.Exclude)
 	if err != nil {
 		return cty.NilVal, err
@@ -470,6 +479,19 @@ type ctyCatalogConfig struct {
 	URLs []string `cty:"urls"`
 }
 
+// CtyOCIConfig is an alternate representation of OCIConfig that converts the list of
+// credentials blocks into a map from the registry name to the credential details.
+type CtyOCIConfig struct {
+	DiscoverAmbientCredentials *bool                             `cty:"discover_ambient_credentials"`
+	DockerConfigFiles          []string                          `cty:"docker_config_files"`
+	CredentialHelpers          []string                          `cty:"credential_helpers"`
+	DefaultCredentialHelper    *string                           `cty:"default_credential_helper"`
+	CacheCredentials           *bool                             `cty:"cache_credentials"`
+	Timeout                    *string                           `cty:"timeout"`
+	RetryAttempts              *int                              `cty:"retry_attempts"`
+	Credentials                map[string]OCICredentialsConfig   `cty:"credentials"`
+}
+
 // ctyEngineConfig is an alternate representation of EngineConfig that converts internal blocks into a map that
 // maps the name to the underlying struct, as opposed to a list representation.
 type ctyEngineConfig struct {
@@ -494,6 +516,32 @@ func catalogConfigAsCty(config *CatalogConfig) (cty.Value, error) {
 
 	configCty := ctyCatalogConfig{
 		URLs: config.URLs,
+	}
+
+	return goTypeToCty(configCty)
+}
+
+// ociConfigAsCty serializes OCIConfig to a cty.Value, using maps for named blocks.
+func ociConfigAsCty(config *OCIConfig) (cty.Value, error) {
+	if config == nil {
+		return cty.NilVal, nil
+	}
+
+	// Use the intermediate struct to correctly represent named credentials blocks as a map.
+	configCty := CtyOCIConfig{
+		DiscoverAmbientCredentials: config.DiscoverAmbientCredentials,
+		DockerConfigFiles:          config.DockerConfigFiles,
+		CredentialHelpers:          config.CredentialHelpers,
+		DefaultCredentialHelper:    config.DefaultCredentialHelper,
+		CacheCredentials:           config.CacheCredentials,
+		Timeout:                    config.Timeout,
+		RetryAttempts:              config.RetryAttempts,
+		Credentials:                map[string]OCICredentialsConfig{},
+	}
+
+	// Convert the slice of credentials into a map keyed by the registry name.
+	for _, cred := range config.Credentials {
+		configCty.Credentials[cred.Registry] = cred
 	}
 
 	return goTypeToCty(configCty)

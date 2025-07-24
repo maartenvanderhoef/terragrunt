@@ -19,6 +19,7 @@ import (
 	"github.com/gruntwork-io/terragrunt/internal/cloner"
 	"github.com/gruntwork-io/terragrunt/internal/errors"
 	"github.com/gruntwork-io/terragrunt/internal/experiment"
+	"github.com/gruntwork-io/terragrunt/internal/oci"
 	"github.com/gruntwork-io/terragrunt/internal/report"
 	"github.com/gruntwork-io/terragrunt/internal/strict"
 	"github.com/gruntwork-io/terragrunt/internal/strict/controls"
@@ -213,6 +214,8 @@ type TerragruntOptions struct {
 	VersionManagerFileName []string
 	// Experiments is a map of experiments, and their status.
 	Experiments experiment.Experiments `clone:"shadowcopy"`
+	// OCIRepositoryStoreFactory is used to create OCI repository stores for module downloads
+	OCIRepositoryStoreFactory oci.RepositoryStoreFactory `clone:"shadowcopy"`
 	// Maximum number of times to retry errors matching RetryableErrors
 	RetryMaxAttempts int
 	// Parallelism limits the number of commands to run concurrently during *-all commands

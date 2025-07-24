@@ -35,6 +35,7 @@ const (
 	versionQueryKey         = "version"
 	authTokenEnvName        = "TG_TF_REGISTRY_TOKEN"
 	defaultRegistryEnvName  = "TG_TF_DEFAULT_REGISTRY_HOST"
+
 )
 
 // RegistryServicePath is a struct for extracting the modules service path in the Registry.
@@ -352,6 +353,7 @@ func applyHostToken(req *http.Request) (*http.Request, error) {
 
 	return req, nil
 }
+
 
 // httpGETAndGetResponse is a helper function to make a GET request to the given URL using the http client. This
 // function will then read the response and return the contents + the response header.
