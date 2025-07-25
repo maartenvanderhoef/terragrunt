@@ -23,35 +23,39 @@ import (
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	orasContent "oras.land/oras-go/v2/content"
 	orasMemoryStore "oras.land/oras-go/v2/content/memory"
+
+	"github.com/gruntwork-io/terragrunt/internal/oci"
+	"github.com/gruntwork-io/terragrunt/options"
+	"github.com/gruntwork-io/terragrunt/pkg/log"
 )
 
 func TestGetterDecompressorsConsistent(t *testing.T) {
 	// This test makes sure that the following three variables are
 	// all defined consistently enough with one another to satisfy
-	// the assumptions that ociDistributionGetter makes about them:
-	// - goGetterDecompressors
-	// - goGetterDecompressorMediaTypes
+	// the assumptions that OCIGetter makes about them:
+	// - getter.Decompressors
+	// - ociDecompressorMediaTypes
 	// - ociBlobMediaTypePreference
 
-	// Assumption 1: all entries in goGetterDecompressorMediaTypes have
-	// a corresponding entry in goGetterDecompressors.
-	for k, v := range goGetterDecompressorMediaTypes {
-		_, ok := goGetterDecompressors[v]
+	// Assumption 1: all entries in ociDecompressorMediaTypes have
+	// a corresponding entry in getter.Decompressors.
+	for k, v := range ociDecompressorMediaTypes {
+		_, ok := getter.Decompressors[v]
 		if !ok {
-			t.Errorf("goGetterDecompressorMediaTypes[%q] refers to %q, which is not defined in goGetterDecompressors", k, v)
+			t.Errorf("ociDecompressorMediaTypes[%q] refers to %q, which is not defined in getter.Decompressors", k, v)
 		}
 	}
 
-	// Assumption 2: every entry in goGetterDecompressorMediaTypes is
+	// Assumption 2: every entry in ociDecompressorMediaTypes is
 	// included somewhere in ociBlobMediaTypePreference, so that we
 	// know which media type to prefer when multiple are present.
-	if lenMT, lenPref := len(goGetterDecompressorMediaTypes), len(ociBlobMediaTypePreference); lenMT != lenPref {
-		t.Errorf("goGetterDecompressorMediaTypes has %d elements, but ociBlobMediaTypePreference has %d; should be equal length", lenMT, lenPref)
+	if lenMT, lenPref := len(ociDecompressorMediaTypes), len(ociBlobMediaTypePreference); lenMT != lenPref {
+		t.Errorf("ociDecompressorMediaTypes has %d elements, but ociBlobMediaTypePreference has %d; should be equal length", lenMT, lenPref)
 	}
 	for _, v := range ociBlobMediaTypePreference {
-		_, ok := goGetterDecompressorMediaTypes[v]
+		_, ok := ociDecompressorMediaTypes[v]
 		if !ok {
-			t.Errorf("ociBlobMediaTypePreference includes %q, which is not present in goGetterDecompressorMediaTypes", v)
+			t.Errorf("ociBlobMediaTypePreference includes %q, which is not present in ociDecompressorMediaTypes", v)
 		}
 	}
 }
@@ -62,7 +66,7 @@ func TestOCIDistributionGetter(t *testing.T) {
 	// where the in-memory store doesn't behave quite the same as a real OCI
 	// Distribution registry client would. :(
 	//
-	// In real use ociDistributionGetter is more likely to be used with ORAS-Go's
+	// In real use OCIGetter is more likely to be used with ORAS-Go's
 	// remote registry client implementation, but that's the caller's responsibility
 	// to decide if so.
 	mainStore := digestResolvingInMemoryOCIStore{
@@ -72,13 +76,13 @@ func TestOCIDistributionGetter(t *testing.T) {
 	// We'll build some fake-but-valid module packages to put in this store so
 	// that we can test various valid source address inputs.
 	latestBlobDesc := ociPushFakeModulePackageBlob(t, "content of latest", mainStore)
-	latestManifestDesc := ociPushFakeImageManifest(t, latestBlobDesc, ociIndexManifestArtifactType, mainStore)
+	latestManifestDesc := ociPushFakeImageManifest(t, latestBlobDesc, ociImageManifestArtifactType, mainStore)
 	ociCreateTag(t, "latest", latestManifestDesc, mainStore)
 	fooBlobDesc := ociPushFakeModulePackageBlob(t, "content of foo", mainStore)
-	fooManifestDesc := ociPushFakeImageManifest(t, fooBlobDesc, ociIndexManifestArtifactType, mainStore)
+	fooManifestDesc := ociPushFakeImageManifest(t, fooBlobDesc, ociImageManifestArtifactType, mainStore)
 	ociCreateTag(t, "foo", fooManifestDesc, mainStore)
 	digestBlobDesc := ociPushFakeModulePackageBlob(t, "content of digest-only reference", mainStore)
-	digestManifestDesc := ociPushFakeImageManifest(t, digestBlobDesc, ociIndexManifestArtifactType, mainStore)
+	digestManifestDesc := ociPushFakeImageManifest(t, digestBlobDesc, ociImageManifestArtifactType, mainStore)
 	digestManifestDigestStr := digestManifestDesc.Digest.String()
 
 	// We'll log the digests of the three manifests we're going to use in
@@ -88,21 +92,17 @@ func TestOCIDistributionGetter(t *testing.T) {
 	t.Logf("'foo' tag\nmanifest: %s\nblob:     %s", fooManifestDesc.Digest, fooBlobDesc.Digest)
 	t.Logf("untagged manifest\nmanifest: %s\nblob:     %s", digestManifestDigestStr, digestBlobDesc.Digest)
 
-	ociGetter := &ociDistributionGetter{
-		getOCIRepositoryStore: func(ctx context.Context, registryDomain, repositoryName string) (OCIRepositoryStore, error) {
-			if registryDomain != "example.com" {
-				return nil, fmt.Errorf("no such registry")
-			}
-			switch repositoryName {
-			case "main":
-				return mainStore, nil
-			case "empty":
-				// We'll just return a completely empty store for this one
-				return orasMemoryStore.New(), nil
-			default:
-				return nil, fmt.Errorf("no such repository")
-			}
+	// Create a mock factory for testing
+	mockFactory := &mockRepositoryStoreFactory{
+		mainStore:  mainStore,
+		emptyStore: orasMemoryStore.New(),
+	}
+
+	ociGetter := &OCIGetter{
+		TerragruntOptions: &options.TerragruntOptions{
+			OCIRepositoryStoreFactory: mockFactory,
 		},
+		Logger: log.Default(),
 	}
 
 	tests := []struct {
@@ -304,6 +304,26 @@ func ociCreateTag(t *testing.T, tagName string, desc ociv1.Descriptor, store ora
 	err := store.Tag(context.Background(), desc, tagName)
 	if err != nil {
 		t.Fatalf("can't create tag %q: %s", tagName, err)
+	}
+}
+
+// mockRepositoryStoreFactory implements oci.RepositoryStoreFactory for testing
+type mockRepositoryStoreFactory struct {
+	mainStore  OCIRepositoryStore
+	emptyStore OCIRepositoryStore
+}
+
+func (m *mockRepositoryStoreFactory) CreateRepositoryStore(ctx context.Context, registryDomain, repositoryName string) (oci.RepositoryStore, error) {
+	if registryDomain != "example.com" {
+		return nil, fmt.Errorf("no such registry")
+	}
+	switch repositoryName {
+	case "main":
+		return m.mainStore, nil
+	case "empty":
+		return m.emptyStore, nil
+	default:
+		return nil, fmt.Errorf("no such repository")
 	}
 }
 

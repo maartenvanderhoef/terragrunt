@@ -14,27 +14,26 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	getter "github.com/hashicorp/go-getter"
 	ociDigest "github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	orasRegistry "oras.land/oras-go/v2/registry"
 
+	"github.com/gruntwork-io/terragrunt/internal/errors"
 	"github.com/gruntwork-io/terragrunt/internal/oci"
 	"github.com/gruntwork-io/terragrunt/options"
 	"github.com/gruntwork-io/terragrunt/pkg/log"
 )
 
-// ociIndexManifestArtifactType is the artifact type we expect for the image
-// manifest describing an OpenTofu module package.
-const ociIndexManifestArtifactType = "application/vnd.opentofu.modulepkg"
+// Constants for OCI module packages
+const (
+	ociAuthTokenEnvName              = "TG_OCI_REGISTRY_TOKEN"
+	ociImageManifestArtifactType     = "application/vnd.opentofu.modulepkg"
+	ociImageManifestSizeLimitMiB     = 4
+)
 
-// ociImageManifestSizeLimit is the maximum size of artifact manifest (aka "image
-// manifest") we'll accept. This 4MiB value matches the recommended limit for
-// repositories to accept on push from the OCI Distribution v1.1 spec:
-//
-//	https://github.com/opencontainers/distribution-spec/blob/v1.1.0/spec.md#pushing-manifests
-const ociImageManifestSizeLimitMiB = 4
 
 // ociBlobMediaTypePreference describes our preference order for the media
 // types of OCI blobs representing module packages.
@@ -47,31 +46,35 @@ var ociBlobMediaTypePreference = []string{
 	"archive/zip",
 }
 
-// goGetterDecompressorMediaTypes maps OCI media types to go-getter decompressor keys
-var goGetterDecompressorMediaTypes = map[string]string{
+// ociDecompressorMediaTypes maps OCI media types to go-getter decompressor keys
+var ociDecompressorMediaTypes = map[string]string{
 	"archive/zip": "zip",
 }
 
-// goGetterDecompressors provides access to go-getter's decompression functionality
-var goGetterDecompressors = getter.Decompressors
-
-// ociDistributionGetter is an implementation of [getter.Getter] that
-// obtains module packages from OCI distribution registries.
+// OCIGetter is a Getter implementation that downloads Terraform/OpenTofu modules
+// from OCI distribution registries. It implements the go-getter.Getter interface
+// to seamlessly integrate with Terragrunt's existing module download infrastructure.
 //
-// Because this implementation lives inside Terragrunt rather than upstream
-// go-getter, it intentionally focuses only on the subset of go-getter
-// functionality that Terragrunt's module installer uses. If we do someday
-// decide to submit this upstream it will need some further work to
-// support additional capabilities that other go-getter callers rely on.
-type ociDistributionGetter struct {
-	getOCIRepositoryStore func(ctx context.Context, registryDomain, repositoryName string) (OCIRepositoryStore, error)
-
-	// go-getter sets this by calling our SetClient method whenever
-	// the client is configured, which happens automatically
-	// when it Get method is called.
-	client *getter.Client
-
-	// Terragrunt-specific fields for logging and options
+// This getter supports URLs in the format:
+//   oci://REGISTRY_DOMAIN/REPOSITORY_PATH?tag=TAG
+//   oci://REGISTRY_DOMAIN/REPOSITORY_PATH?digest=DIGEST
+//
+// Where:
+//   - REGISTRY_DOMAIN is the OCI registry endpoint (e.g., registry.example.com)
+//   - REPOSITORY_PATH is the repository path (e.g., namespace/module-name)
+//   - TAG specifies a version tag (e.g., v1.0.0, latest)
+//   - DIGEST specifies a content digest (e.g., sha256:abc123...)
+//
+// Authentication is handled through multiple methods in priority order:
+//   1. Terraform CLI configuration (~/.terraformrc or equivalent)
+//   2. TG_OCI_REGISTRY_TOKEN environment variable
+//   3. No authentication (for public registries)
+//
+// The getter validates OCI manifests, downloads module packages, and extracts
+// them to the destination directory following the same patterns as other
+// Terragrunt getters.
+type OCIGetter struct {
+	client            *getter.Client
 	TerragruntOptions *options.TerragruntOptions
 	Logger            log.Logger
 }
@@ -79,248 +82,355 @@ type ociDistributionGetter struct {
 // OCIRepositoryStore is an alias for oci.RepositoryStore for backward compatibility
 type OCIRepositoryStore = oci.RepositoryStore
 
-// OCIGetter is a backward compatibility alias for ociDistributionGetter
-type OCIGetter = ociDistributionGetter
-
-var _ getter.Getter = (*ociDistributionGetter)(nil)
+var _ getter.Getter = (*OCIGetter)(nil)
 
 
-// SetClient implements getter.Getter.
-func (g *ociDistributionGetter) SetClient(client *getter.Client) {
-	g.client = client
+// SetClient configures the getter with a go-getter client for progress tracking
+// and context management. This method is called automatically by go-getter
+// when the getter is registered and used.
+//
+// The client provides access to the execution context, progress callbacks,
+// and configuration options that control the download behavior.
+func (og *OCIGetter) SetClient(client *getter.Client) {
+	og.client = client
 }
 
-// ClientMode implements getter.Getter.
-func (g *ociDistributionGetter) ClientMode(*url.URL) (getter.ClientMode, error) {
-	// This getter only supports "dir" mode, meaning that
-	// it populates a directory based on the content of the
-	// retrieved archive rather than _just_ retrieving the
-	// archive. In practice this isn't actually used in
-	// OpenTofu, because OpenTofu _always_ asks for
-	// go-getter to populate a directory, but we're required
-	// to implement this method to satisfy the Getter interface.
+// ClientMode returns the download mode for this getter. Since OCI registries
+// distribute complete module packages, this always returns getter.ClientModeDir
+// to indicate that entire directories should be downloaded rather than individual files.
+//
+// This is consistent with other module-oriented getters in Terragrunt that
+// download complete Terraform configurations.
+func (og *OCIGetter) ClientMode(u *url.URL) (getter.ClientMode, error) {
 	return getter.ClientModeDir, nil
 }
 
-func (g *ociDistributionGetter) context() context.Context {
-	// go-getter was designed long before [context.Context] existed, so
-	// it passes us a context only indirectly through the client.
-	if g == nil || g.client == nil {
-		return context.Background() // For robustness, but client should always be set in practice
+// Context returns the go context to use for all OCI operations including
+// registry authentication, manifest resolution, and blob downloads.
+//
+// The context is derived from the configured client, or defaults to
+// context.Background() if no client is available. This context carries
+// cancellation signals and deadlines through the entire download process.
+func (og *OCIGetter) Context() context.Context {
+	if og == nil || og.client == nil {
+		return context.Background()
 	}
-	return g.client.Ctx
+	return og.client.Ctx
 }
 
-// Get implements getter.Getter.
-func (g *ociDistributionGetter) Get(destDir string, url *url.URL) error {
-	ctx := g.context()
+// Get downloads a Terraform module from an OCI registry to the specified destination.
+// This is the main entry point for the getter and orchestrates the entire download process.
+//
+// The method performs these steps:
+//   1. Parse and validate the OCI URL
+//   2. Create an authenticated repository store
+//   3. Resolve the tag or digest to a manifest descriptor
+//   4. Fetch and validate the OCI image manifest
+//   5. Select the appropriate layer blob containing the module
+//   6. Download the blob to a temporary file
+//   7. Extract the module contents to the destination directory
+//
+// Parameters:
+//   - dstPath: Local filesystem path where the module should be extracted
+//   - srcURL: OCI URL in the format oci://registry/repository?tag=version
+//
+// Returns an error if any step fails, including network issues, authentication
+// failures, invalid manifests, or filesystem problems.
+func (og *OCIGetter) Get(dstPath string, srcURL *url.URL) error {
+	ctx := og.Context()
+	startTime := time.Now()
 
-	// Add optional logging if available
-	if g.Logger != nil {
-		g.Logger.Debugf("Fetching OCI module from %s to %s", url.String(), destDir)
+	// Add request ID for tracing
+	requestID := fmt.Sprintf("oci-get-%d", time.Now().UnixNano())
+	ctx = oci.ContextWithOCIRequestID(ctx, requestID)
+
+	og.Logger.Debugf("[%s] Fetching OCI module from %s to %s", requestID, srcURL.String(), dstPath)
+
+	// Validate that we have an OCI store factory (dependency injection)
+	if og.TerragruntOptions.OCIRepositoryStoreFactory == nil {
+		return OCIConfigurationErr{
+			Issue:     "OCI repository store factory not configured",
+			RequestID: requestID,
+		}
 	}
 
-	ref, err := g.resolveRepositoryRef(url)
+	ref, err := og.resolveRepositoryRef(srcURL, requestID)
 	if err != nil {
 		return err
 	}
-	
-	// Use factory function from TerragruntOptions if available, otherwise use direct factory function
-	var store OCIRepositoryStore
-	if g.getOCIRepositoryStore != nil {
-		store, err = g.getOCIRepositoryStore(ctx, ref.Registry, ref.Repository)
-	} else if g.TerragruntOptions != nil && g.TerragruntOptions.OCIRepositoryStoreFactory != nil {
-		store, err = g.TerragruntOptions.OCIRepositoryStoreFactory.CreateRepositoryStore(ctx, ref.Registry, ref.Repository)
-	} else {
-		err = fmt.Errorf("OCI repository store factory not configured")
-	}
+
+	og.Logger.Debugf("[%s] Creating repository store for %s/%s", requestID, ref.Registry, ref.Repository)
+	store, err := og.TerragruntOptions.OCIRepositoryStoreFactory.CreateRepositoryStore(ctx, ref.Registry, ref.Repository)
 	if err != nil {
-		err := fmt.Errorf("configuring client for %s: %w", ref, err)
+		og.Logger.Errorf("[%s] Failed to create repository store: %v", requestID, err)
+		return errors.New(fmt.Errorf("configuring OCI client for %s: %w", ref, err))
+	}
+
+	og.Logger.Debugf("[%s] Resolving manifest descriptor", requestID)
+	manifestDesc, err := og.resolveManifestDescriptor(ctx, ref, srcURL.Query(), store, requestID)
+	if err != nil {
+		og.Logger.Errorf("[%s] Failed to resolve manifest descriptor: %v", requestID, err)
 		return err
 	}
-	manifestDesc, err := g.resolveManifestDescriptor(ctx, ref, url.Query(), store)
+
+	og.Logger.Debugf("[%s] Fetching OCI image manifest", requestID)
+	manifest, err := og.fetchOCIImageManifest(ctx, manifestDesc, store, requestID)
 	if err != nil {
+		og.Logger.Errorf("[%s] Failed to fetch OCI image manifest: %v", requestID, err)
 		return err
 	}
-	manifest, err := fetchOCIImageManifest(ctx, manifestDesc, store)
+
+	og.Logger.Debugf("[%s] Selecting layer blob from %d layers", requestID, len(manifest.Layers))
+	pkgDesc, err := og.selectOCILayerBlob(manifest.Layers, requestID)
 	if err != nil {
+		og.Logger.Errorf("[%s] Failed to select layer blob: %v", requestID, err)
 		return err
 	}
-	pkgDesc, err := selectOCILayerBlob(manifest.Layers)
-	if err != nil {
-		return err
-	}
-	decompKey := goGetterDecompressorMediaTypes[pkgDesc.MediaType]
-	decomp := goGetterDecompressors[decompKey]
+
+	decompKey := ociDecompressorMediaTypes[pkgDesc.MediaType]
+	decomp := getter.Decompressors[decompKey]
+
 	if decomp == nil {
-		// Should not get here if selectOCILayerBlob is implemented correctly.
-		err := fmt.Errorf("no decompressor available for media type %q", pkgDesc.MediaType)
-		return err
+		return OCIModuleExtractionErr{
+			Registry:    ref.Registry,
+			Repository:  ref.Repository,
+			MediaType:   pkgDesc.MediaType,
+			Destination: dstPath,
+			Issue:       fmt.Sprintf("no decompressor available for media type %q", pkgDesc.MediaType),
+			RequestID:   requestID,
+		}
 	}
-	tempFile, err := fetchOCIBlobToTemporaryFile(ctx, pkgDesc, store)
+
+	og.Logger.Debugf("[%s] Downloading blob to temporary file (size: %d bytes)", requestID, pkgDesc.Size)
+	tempFile, err := og.fetchOCIBlobToTemporaryFile(ctx, pkgDesc, store, requestID)
 	if err != nil {
+		og.Logger.Errorf("[%s] Failed to download blob: %v", requestID, err)
 		return err
 	}
 	defer os.Remove(tempFile)
 
 	var umask os.FileMode
-	if g.client != nil {
-		umask = g.client.Umask
-	}
-	err = decomp.Decompress(destDir, tempFile, true, umask)
-	if err != nil {
-		err := fmt.Errorf("decompressing package into %s: %w", destDir, err)
-		return err
+	if og.client != nil {
+		umask = og.client.Umask
 	}
 
-	if g.Logger != nil {
-		g.Logger.Debugf("Successfully fetched OCI module to %s", destDir)
+	og.Logger.Debugf("[%s] Decompressing package to %s", requestID, dstPath)
+	err = decomp.Decompress(dstPath, tempFile, true, umask)
+	if err != nil {
+		return OCIModuleExtractionErr{
+			Registry:    ref.Registry,
+			Repository:  ref.Repository,
+			MediaType:   pkgDesc.MediaType,
+			Destination: dstPath,
+			Issue:       "decompression failed",
+			Cause:       err,
+			RequestID:   requestID,
+		}
 	}
+
+	duration := time.Since(startTime)
+	og.Logger.Debugf("[%s] Successfully fetched OCI module to %s in %v", requestID, dstPath, duration)
 	return nil
 }
 
-// GetFile implements getter.Getter.
-func (g *ociDistributionGetter) GetFile(string, *url.URL) error {
-	// With how OpenTofu uses go-getter we can only get in here if
-	// the source address string includes go-getter's special
-	// reserved "archive" query string argument, which causes
-	// go-getter itself to arrange for extracting the downloaded
-	// archive.
-	//
-	// This getter includes its own archive handling that reacts
-	// directly to the mediaType declared in the OCI image
-	// manifest, so the "archive" query string argument does
-	// not need to be supported here. (It's primarily intended
-	// for general-purpose arbitrary file fetching getters like
-	// the HTTP getter.)
-	return fmt.Errorf("the \"archive\" argument is not allowed for OCI sources, because the archive format is detected automatically from the image manifest")
+// GetFile is not implemented for the OCI getter since OCI registries distribute
+// complete module packages rather than individual files. Attempting to use this
+// method will return an error directing users to use the directory-based Get method.
+//
+// This follows the same pattern as the Terraform Registry getter, which also
+// only supports downloading complete modules.
+func (og *OCIGetter) GetFile(dst string, src *url.URL) error {
+	return OCIUnsupportedOperationErr{
+		Operation: "GetFile",
+		Reason:    "OCI getter only supports directory-based downloads, not individual files",
+	}
 }
 
-func (g *ociDistributionGetter) resolveRepositoryRef(url *url.URL) (*orasRegistry.Reference, error) {
-	if !url.IsAbs() {
-		// Should not get here, but just for robustness since go-getter
-		// is a little quirky in what it allows users to express
-		// with its source address syntax.
-		return nil, fmt.Errorf("oci source type requires an absolute URL")
+// resolveRepositoryRef parses an OCI URL into a registry reference that can be
+// used with the ORAS library. It validates the URL format and extracts the
+// registry domain and repository path components.
+//
+// The URL must be absolute with the "oci" scheme. The host becomes the registry
+// domain, and the path becomes the repository name after removing the leading slash.
+//
+// Returns a validated ORAS registry reference or an error if the URL format is invalid.
+func (og *OCIGetter) resolveRepositoryRef(srcURL *url.URL, requestID string) (*orasRegistry.Reference, error) {
+	og.Logger.Tracef("[%s] Parsing OCI URL: %s", requestID, srcURL.String())
+	
+	if !srcURL.IsAbs() {
+		return nil, OCIURLParseErr{
+			URL:       srcURL.String(),
+			Reason:    "oci source type requires an absolute URL",
+			RequestID: requestID,
+		}
 	}
-	if url.Scheme != "oci" {
-		// We can potentially get in here if the author writes a bizarre
-		// source address with an explicit getter separate from the
-		// scheme, like oci::https://example.com/ .
-		return nil, fmt.Errorf("oci source type only supports oci URL scheme")
-		// Most authors will hopefully write just oci:// as the scheme part
-		// and let go-getter automatically select the oci getter based on
-		// that, in which case the scheme will be set correctly.
+	if srcURL.Scheme != "oci" {
+		return nil, OCIURLParseErr{
+			URL:       srcURL.String(),
+			Reason:    "oci source type only supports oci URL scheme",
+			RequestID: requestID,
+		}
 	}
 
-	// As usual, registryDomainName can optionally include a trailing
-	// port number separated by a colon despite the name. This is a
-	// standard naming quirk in OCI Distribution implementations,
-	// since most addresses do not use an explicit port number.
-	registryDomainName := url.Host
+	registryDomain := srcURL.Host
+	repositoryName := strings.TrimPrefix(srcURL.Path, "/")
 
-	// The OpenTofu module installer has already stripped off any
-	// "subdir" part of the path before calling us, so we can assume
-	// that the entire path is intended to be the repository name,
-	// except that the leading slash should not be included.
-	repositoryName := strings.TrimPrefix(url.Path, "/")
+	og.Logger.Tracef("[%s] Parsed registry=%s, repository=%s", requestID, registryDomain, repositoryName)
 
-	// We'll borrow ORAS-Go's implementation to validate the address elements.
 	ref := &orasRegistry.Reference{
-		Registry:   registryDomainName,
+		Registry:   registryDomain,
 		Repository: repositoryName,
 	}
 	if err := ref.Validate(); err != nil {
-		// ORAS-Go's error messages already include an "invalid reference:"
-		// prefix, so we won't add anything new here.
-		return nil, err
+		return nil, OCIURLParseErr{
+			URL:       srcURL.String(),
+			Reason:    fmt.Sprintf("invalid OCI reference: %v", err),
+			RequestID: requestID,
+		}
 	}
 	return ref, nil
 }
 
-func (g *ociDistributionGetter) resolveManifestDescriptor(ctx context.Context, ref *orasRegistry.Reference, query url.Values, store OCIRepositoryStore) (desc ociv1.Descriptor, err error) {
+// resolveManifestDescriptor resolves a tag name or digest from the URL query parameters
+// to an OCI manifest descriptor. This method handles both tag-based and digest-based
+// references, with "latest" as the default tag if neither is specified.
+//
+// The method validates query parameters to ensure only one reference type is provided
+// and that the reference format is valid according to OCI specifications.
+//
+// Parameters:
+//   - ctx: Context for the resolution operation
+//   - ref: Registry reference containing domain and repository
+//   - query: URL query parameters containing tag or digest
+//   - store: Repository store for performing the resolution
+//
+// Returns the resolved manifest descriptor with media type validation, or an error
+// if the reference cannot be resolved or is not a valid OCI image manifest.
+func (og *OCIGetter) resolveManifestDescriptor(ctx context.Context, ref *orasRegistry.Reference, query url.Values, store OCIRepositoryStore, requestID string) (ociv1.Descriptor, error) {
+	og.Logger.Tracef("[%s] Resolving OCI reference for registry=%s, repository=%s", requestID, ref.Registry, ref.Repository)
+
 	var unsupportedArgs []string
 	var wantTag string
 	var wantDigest ociDigest.Digest
+
 	for name, values := range query {
 		if len(values) > 1 {
-			return ociv1.Descriptor{}, fmt.Errorf("too many %q arguments", name)
+			return ociv1.Descriptor{}, OCIURLParseErr{
+				URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+				Reason:    fmt.Sprintf("too many %q arguments", name),
+				RequestID: requestID,
+			}
 		}
 		value := values[0]
 		switch name {
 		case "tag":
 			if value == "" {
-				return ociv1.Descriptor{}, fmt.Errorf("tag argument must not be empty")
+				return ociv1.Descriptor{}, OCIURLParseErr{
+					URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+					Reason:    "tag argument must not be empty",
+					RequestID: requestID,
+				}
 			}
-			tagRef := *ref           // shallow copy so we can modify the reference field
-			tagRef.Reference = value // We'll again borrow the ORAS-Go validation for this
+			tagRef := *ref
+			tagRef.Reference = value
 			if err := tagRef.ValidateReferenceAsTag(); err != nil {
-				return ociv1.Descriptor{}, err // message includes suitable context prefix already
+				return ociv1.Descriptor{}, errors.New(err)
 			}
 			wantTag = value
 		case "digest":
 			if value == "" {
-				return ociv1.Descriptor{}, fmt.Errorf("digest argument must not be empty")
+				return ociv1.Descriptor{}, OCIURLParseErr{
+					URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+					Reason:    "digest argument must not be empty",
+					RequestID: requestID,
+				}
 			}
 			d, err := ociDigest.Parse(value)
 			if err != nil {
-				return ociv1.Descriptor{}, fmt.Errorf("invalid digest: %s", err)
+				return ociv1.Descriptor{}, OCIURLParseErr{
+					URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+					Reason:    fmt.Sprintf("invalid digest: %s", err),
+					RequestID: requestID,
+				}
 			}
 			wantDigest = d
 		default:
 			unsupportedArgs = append(unsupportedArgs, name)
 		}
 	}
+
 	if len(unsupportedArgs) == 1 {
-		return ociv1.Descriptor{}, fmt.Errorf("unsupported argument %q", unsupportedArgs[0])
+		return ociv1.Descriptor{}, OCIURLParseErr{
+			URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+			Reason:    fmt.Sprintf("unsupported argument %q", unsupportedArgs[0]),
+			RequestID: requestID,
+		}
 	} else if len(unsupportedArgs) >= 2 {
-		return ociv1.Descriptor{}, fmt.Errorf("unsupported arguments: %s", strings.Join(unsupportedArgs, ", "))
+		return ociv1.Descriptor{}, OCIURLParseErr{
+			URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+			Reason:    fmt.Sprintf("unsupported arguments: %s", strings.Join(unsupportedArgs, ", ")),
+			RequestID: requestID,
+		}
 	}
+
 	if wantTag != "" && wantDigest != "" {
-		return ociv1.Descriptor{}, fmt.Errorf("cannot set both \"tag\" and \"digest\" arguments")
+		return ociv1.Descriptor{}, OCIURLParseErr{
+			URL:       fmt.Sprintf("%s/%s", ref.Registry, ref.Repository),
+			Reason:    "cannot set both \"tag\" and \"digest\" arguments",
+			RequestID: requestID,
+		}
 	}
+
 	if wantTag == "" && wantDigest == "" {
-		wantTag = "latest" // default tag to use if no arguments are present
+		og.Logger.Warnf("[%s] No tag or digest specified for OCI module %s. Defaulting to 'latest', which is not recommended for production.", requestID, ref.Repository)
+		wantTag = "latest"
 	}
+
+	var desc ociv1.Descriptor
+	var err error
 
 	if wantTag != "" {
-		// If we're starting with a tag name then we need to query the
-		// repository to find out which digest is currently selected.
+		og.Logger.Debugf("[%s] Resolving OCI tag: %s", requestID, wantTag)
 		desc, err = store.Resolve(ctx, wantTag)
 		if err != nil {
-			return ociv1.Descriptor{}, fmt.Errorf("resolving tag %q: %w", wantTag, err)
+			return ociv1.Descriptor{}, errors.New(fmt.Errorf("[%s] resolving tag %q: %w", requestID, wantTag, err))
 		}
 	} else {
-		// If we're requesting a specific digest then we still need to
-		// resolve to know the size and mediaType.
-		// NOTE: The following is supported for the "real" OCI Distribution
-		// protocol implementatino of ORAS-Go's "resolver" API, but
-		// most of the other implementations only allow resolving by tag,
-		// and so we can't exercise this specific case from unit tests
-		// using in-memory or on-disk fakes. :(
+		og.Logger.Debugf("[%s] Resolving OCI digest: %s", requestID, wantDigest.String())
 		desc, err = store.Resolve(ctx, wantDigest.String())
 		if err != nil {
-			return ociv1.Descriptor{}, fmt.Errorf("resolving digest %q: %w", wantDigest, err)
+			return ociv1.Descriptor{}, errors.New(fmt.Errorf("[%s] resolving digest %q: %w", requestID, wantDigest, err))
 		}
 	}
 
-	// The initial request is only required to return a "plain" descriptor,
-	// with only MediaType+Digest+Size, so we can verify the media type
-	// here but we'll need to wait until we fetch the manifest to verify
-	// the ArtifactType and any other details.
 	if desc.MediaType != ociv1.MediaTypeImageManifest {
-		return ociv1.Descriptor{}, fmt.Errorf("selected object is not an OCI image manifest")
+		return ociv1.Descriptor{}, OCIManifestErr{
+			Registry:   ref.Registry,
+			Repository: ref.Repository,
+			Reference:  wantTag + wantDigest.String(),
+			Issue:      "selected object is not an OCI image manifest",
+			RequestID:  requestID,
+		}
 	}
 
-	// We always expect ArtifactType to be set to our OpenTofu-specific type,
-	// so we can reject attempts to install other kinds of artifact.
-	desc.ArtifactType = ociIndexManifestArtifactType
-
+	desc.ArtifactType = ociImageManifestArtifactType
 	return desc, nil
 }
 
-func fetchOCIImageManifest(ctx context.Context, desc ociv1.Descriptor, store OCIRepositoryStore) (*ociv1.Manifest, error) {
-	manifestSrc, err := fetchOCIManifestBlob(ctx, desc, store)
+// fetchOCIImageManifest downloads and validates an OCI image manifest from the registry.
+// This method ensures the manifest is properly formatted JSON and contains the expected
+// artifact type for Terraform/OpenTofu modules.
+//
+// The method performs size validation, content integrity checking, and format validation
+// to ensure the manifest can be safely processed. It also handles special cases like
+// index manifests and provides helpful error messages for common issues.
+//
+// Returns the parsed and validated manifest, or an error if the manifest is invalid,
+// too large, or cannot be downloaded.
+func (og *OCIGetter) fetchOCIImageManifest(ctx context.Context, desc ociv1.Descriptor, store OCIRepositoryStore, requestID string) (*ociv1.Manifest, error) {
+	og.Logger.Tracef("[%s] Fetching OCI manifest: digest=%s, size=%d", requestID, desc.Digest.String(), desc.Size)
+
+	manifestSrc, err := og.fetchOCIManifestBlob(ctx, desc, store, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -328,138 +438,161 @@ func fetchOCIImageManifest(ctx context.Context, desc ociv1.Descriptor, store OCI
 	var manifest ociv1.Manifest
 	err = json.Unmarshal(manifestSrc, &manifest)
 	if err != nil {
-		// As an aid to debugging, we'll check whether we seem to have retrieved
-		// an index manifest instead of an image manifest, since an unmarshal
-		// failure could prevent us from reaching the MediaType check below.
-		var manifest ociv1.Index
-		if err := json.Unmarshal(manifestSrc, &manifest); err == nil && manifest.MediaType == ociv1.MediaTypeImageIndex {
-			return nil, fmt.Errorf("found index manifest but need image manifest")
+		// Check if we got an index manifest instead
+		var indexManifest ociv1.Index
+		if err := json.Unmarshal(manifestSrc, &indexManifest); err == nil && indexManifest.MediaType == ociv1.MediaTypeImageIndex {
+			return nil, OCIManifestErr{
+				Registry:   "unknown", // We don't have ref context here
+				Repository: "unknown",
+				Issue:      "found an OCI image index but an image manifest is required. This can happen with multi-platform modules. Please specify a more precise tag or digest that points directly to a manifest for your platform.",
+				RequestID:  requestID,
+			}
 		}
-		return nil, fmt.Errorf("invalid manifest content: %w", err)
+		return nil, OCIManifestErr{
+			Registry:   "unknown",
+			Repository: "unknown", 
+			Issue:      fmt.Sprintf("invalid manifest content: %v", err),
+			RequestID:  requestID,
+		}
 	}
 
-	// Now we'll make sure that what we decoded seems vaguely sensible before we
-	// return it. Callers are allowed to rely on these checks by verifying
-	// that their provided descriptor specifies the wanted media and artifact
-	// types before they call this function and then assuming that the result
-	// definitely matches what they asked for.
 	if manifest.MediaType != desc.MediaType {
-		return nil, fmt.Errorf("unexpected manifest media type %q", manifest.MediaType)
+		return nil, OCIManifestErr{
+			Registry:   "unknown",
+			Repository: "unknown",
+			Issue:      fmt.Sprintf("unexpected manifest media type %q", manifest.MediaType),
+			RequestID:  requestID,
+		}
 	}
 	if manifest.ArtifactType != desc.ArtifactType {
-		return nil, fmt.Errorf("unexpected artifact type %q", manifest.ArtifactType)
+		return nil, OCIManifestErr{
+			Registry:   "unknown",
+			Repository: "unknown",
+			Issue:      fmt.Sprintf("unexpected artifact type %q", manifest.ArtifactType),
+			RequestID:  requestID,
+		}
 	}
-	// We intentionally leave everything else loose so that we'll have flexibility
-	// to extend this format in backward-compatible ways in future OpenTofu versions.
+
 	return &manifest, nil
 }
 
-func fetchOCIManifestBlob(ctx context.Context, desc ociv1.Descriptor, store OCIRepositoryStore) ([]byte, error) {
-	// We impose a size limit on the manifest just to avoid an abusive remote registry
-	// occupuing unbounded memory when we read the manifest content into memory below.
+// fetchOCIManifestBlob downloads the raw manifest content and verifies its integrity
+// against the provided descriptor. This method handles size limits, content validation,
+// and ensures the downloaded content matches the expected digest.
+//
+// The manifest size is limited to prevent resource exhaustion attacks, and the content
+// is verified using cryptographic hashes to ensure it hasn't been tampered with during transit.
+//
+// Returns the raw manifest bytes or an error if download fails or content is invalid.
+func (og *OCIGetter) fetchOCIManifestBlob(ctx context.Context, desc ociv1.Descriptor, store OCIRepositoryStore, requestID string) ([]byte, error) {
 	if (desc.Size / 1024 / 1024) > ociImageManifestSizeLimitMiB {
-		return nil, fmt.Errorf("manifest size exceeds OpenTofu's size limit of %d MiB", ociImageManifestSizeLimitMiB)
+		return nil, errors.New(fmt.Errorf("[%s] manifest size exceeds limit of %d MiB", requestID, ociImageManifestSizeLimitMiB))
 	}
 
 	readCloser, err := store.Fetch(ctx, desc)
 	if err != nil {
-		return nil, err
+		return nil, errors.New(err)
 	}
 	defer readCloser.Close()
-	manifestReader := io.LimitReader(readCloser, desc.Size)
 
-	// We need to verify that the content matches the digest in the descriptor,
-	// and we also need to parse that data as JSON. We impose a reasonable upper
-	// limit on manifest size, so we'll make our life easier for both by buffering
-	// the whole manifest in RAM.
+	manifestReader := io.LimitReader(readCloser, desc.Size)
 	manifestSrc, err := io.ReadAll(manifestReader)
 	if err != nil {
-		return nil, fmt.Errorf("reading manifest content: %w", err)
+		return nil, errors.New(fmt.Errorf("[%s] reading manifest content: %w", requestID, err))
 	}
 
 	gotDigest := desc.Digest.Algorithm().FromBytes(manifestSrc)
 	if gotDigest != desc.Digest {
-		return nil, fmt.Errorf("manifest content does not match digest %s", desc.Digest)
+		return nil, errors.New(fmt.Errorf("[%s] manifest content does not match digest %s", requestID, desc.Digest))
 	}
 
 	return manifestSrc, nil
 }
 
-func selectOCILayerBlob(descs []ociv1.Descriptor) (ociv1.Descriptor, error) {
-	foundBlobs := make(map[string]ociv1.Descriptor, len(goGetterDecompressorMediaTypes))
+// selectOCILayerBlob chooses the most appropriate layer from an OCI manifest
+// for use as a Terraform module package. This method implements a preference
+// system that prioritizes certain archive formats over others.
+//
+// The selection process:
+//   1. Filters layers to only those with supported media types
+//   2. Validates that there's only one layer per supported media type
+//   3. Selects the highest-priority supported layer based on preferences
+//
+// Returns the selected layer descriptor or an error if no suitable layer is found.
+func (og *OCIGetter) selectOCILayerBlob(descs []ociv1.Descriptor, requestID string) (ociv1.Descriptor, error) {
+	foundBlobs := make(map[string]ociv1.Descriptor, len(ociDecompressorMediaTypes))
 	foundWrongMediaTypeBlobs := 0
+	var availableTypes []string
+
 	for _, desc := range descs {
-		if _, ok := goGetterDecompressorMediaTypes[desc.MediaType]; ok {
+		if _, ok := ociDecompressorMediaTypes[desc.MediaType]; ok {
 			if _, exists := foundBlobs[desc.MediaType]; exists {
-				// We only allow one layer for each of our supported media types
-				// because otherwise we'd have no way to choose between them.
-				return ociv1.Descriptor{}, fmt.Errorf("multiple layers with media type %q", desc.MediaType)
+				return ociv1.Descriptor{}, errors.New(fmt.Errorf("[%s] multiple layers with media type %q", requestID, desc.MediaType))
 			}
 			foundBlobs[desc.MediaType] = desc
+			availableTypes = append(availableTypes, desc.MediaType)
 		} else {
-			// We silently ignore any "layer" that doesn't use one of our
-			// supported media types so that future versions of OpenTofu
-			// can potentially support additional archive formats,
-			// but we do still count them so that we can hint about
-			// potential problems in an error message below.
 			foundWrongMediaTypeBlobs++
 		}
 	}
+
 	if len(foundBlobs) == 0 {
-		if foundWrongMediaTypeBlobs > 0 {
-			return ociv1.Descriptor{}, fmt.Errorf("image manifest contains no layers of types supported as module packages by OpenTofu, but has other unsupported formats; this OCI artifact might be intended for a different version of OpenTofu")
+		var supportedTypes []string
+		for mediaType := range ociDecompressorMediaTypes {
+			supportedTypes = append(supportedTypes, mediaType)
 		}
-		return ociv1.Descriptor{}, fmt.Errorf("image manifest contains no layers of types supported as module packages by OpenTofu")
+
+		return ociv1.Descriptor{}, OCILayerSelectionErr{
+			Registry:       "unknown",
+			Repository:     "unknown",
+			AvailableTypes: availableTypes,
+			SupportedTypes: supportedTypes,
+			RequestID:      requestID,
+		}
 	}
+
 	for _, maybeType := range ociBlobMediaTypePreference {
 		ret, ok := foundBlobs[maybeType]
 		if ok {
+			og.Logger.Debugf("[%s] Selected layer with media type %s", requestID, maybeType)
 			return ret, nil
 		}
 	}
-	// We should not get here if goGetterDecompressorMediaTypes and
-	// ociBlobMediaTypePreference have been maintained consistently,
-	// but we'll return an error here anyway just to be robust.
-	return ociv1.Descriptor{}, fmt.Errorf("image manifest contains no layers of types supported as module packages by OpenTofu")
+
+	return ociv1.Descriptor{}, errors.New(fmt.Errorf("[%s] no suitable layer found despite having supported types", requestID))
 }
 
-// fetchOCIBlobToTemporaryFile uses the given ORAS fetcher to pull the content of the
-// blob described by "desc" into a temporary file on the local filesystem, and
-// then returns the path to that file.
+// fetchOCIBlobToTemporaryFile downloads an OCI blob to a temporary file for extraction.
+// This method handles the download of module package archives from the registry,
+// providing progress feedback and proper cleanup on errors.
 //
-// It is the caller's responsibility to delete the temporary file once it's no longer
-// needed.
-func fetchOCIBlobToTemporaryFile(ctx context.Context, desc ociv1.Descriptor, store OCIRepositoryStore) (tempFile string, err error) {
-	f, err := os.CreateTemp("", "opentofu-module")
+// The method creates a temporary file, downloads the blob content, and returns the
+// file path. The caller is responsible for deleting the temporary file when done.
+//
+// Returns the temporary file path or an error if the download fails.
+func (og *OCIGetter) fetchOCIBlobToTemporaryFile(ctx context.Context, desc ociv1.Descriptor, store OCIRepositoryStore, requestID string) (tempFile string, err error) {
+	f, err := os.CreateTemp("", "terragrunt-oci-module")
 	if err != nil {
-		err := fmt.Errorf("failed to open temporary file: %w", err)
-		return "", err
+		return "", errors.New(fmt.Errorf("[%s] failed to open temporary file: %w", requestID, err))
 	}
 	tempFile = f.Name()
 	defer func() {
-		// If we're returning an error then the caller won't make use of the
-		// file we've created, so we'll make a best effort to proactively
-		// remove it. If we return a nil error then it's the caller's
-		// responsibility to remove the file once it's no longer needed.
 		if err != nil {
 			os.Remove(f.Name())
 		}
 	}()
 
+	og.Logger.Tracef("[%s] Fetching blob content from registry", requestID)
 	readCloser, err := store.Fetch(ctx, desc)
 	if err != nil {
-		return "", err
+		return "", errors.New(fmt.Errorf("[%s] failed to fetch blob: %w", requestID, err))
 	}
 	defer readCloser.Close()
 
-	// We'll borrow go-getter's "cancelable copy" implementation here so that
-	// the download can potentially be interrupted partway through.
-	// Note: Unlike the OpenTofu reference, we don't have VerifyReader available
-	// so we rely on the store implementation for content verification.
 	_, err = getter.Copy(ctx, f, readCloser)
-	f.Close() // we're done using the filehandle now, even if the copy failed
+	f.Close()
 	if err != nil {
-		return "", err
+		return "", errors.New(fmt.Errorf("[%s] failed to copy blob to temporary file: %w", requestID, err))
 	}
 
 	return tempFile, nil
